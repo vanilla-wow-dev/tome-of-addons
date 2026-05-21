@@ -55,22 +55,39 @@ npx tauri signer generate -w ~/.tauri/tome-of-addons.key -p "<starkes-passwort>"
 
 und neuen Pubkey in `tauri.conf.json` eintragen.
 
-### 3. GitHub-Secrets setzen
+### 3. it4c-release-bot installieren
 
-Im GitHub-Repo unter Settings → Secrets and variables → Actions:
+release-please läuft unter dem `it4c-release-bot` GitHub-App-Account (gleiche
+App wie auf jahrweiser, sauberere Attribution als `github-actions[bot]`).
+
+1. GitHub-App `it4c-release-bot` auf der Org `vanilla-wow-dev` oder direkt
+   auf `vanilla-wow-dev/tome-of-addons` installieren.
+2. App-Permissions müssen `contents: write` und `pull-requests: write`
+   enthalten — bei jahrweiser bereits so konfiguriert.
+
+### 4. Repo-Variablen und Secrets setzen
+
+Unter Settings → Secrets and variables → Actions:
+
+**Variables:**
+
+| Variable | Wert |
+| --- | --- |
+| `RELEASE_APP_ID` | App-ID des `it4c-release-bot` (gleicher Wert wie auf jahrweiser) |
+
+**Secrets:**
 
 | Secret | Wert |
 | --- | --- |
+| `RELEASE_APP_PRIVATE_KEY` | Private Key des `it4c-release-bot` (PEM, gleicher Wert wie auf jahrweiser) |
 | `TAURI_SIGNING_PRIVATE_KEY` | Inhalt von `~/.tauri/tome-of-addons.key` (komplette Datei) |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Passwort des Keys, leer wenn ohne Passwort erzeugt |
 
-Zusätzlich unter Settings → Actions → General → **Workflow permissions**:
-- „Read and write permissions" aktivieren
-- „Allow GitHub Actions to create and approve pull requests" aktivieren
+**Tipp:** Wenn `RELEASE_APP_ID` und `RELEASE_APP_PRIVATE_KEY` auf Org-Level
+(`vanilla-wow-dev`) gesetzt sind, erben alle Repos in der Org sie automatisch
+— einmaliges Setup für künftige Tools.
 
-Ohne diese Einstellung kann release-please seine Release-PR nicht öffnen.
-
-### 4. Release-Flow (release-please)
+### 5. Release-Flow (release-please)
 
 Versionen werden **nicht manuell gebumpt**. Stattdessen orchestriert
 [release-please](https://github.com/googleapis/release-please) den ganzen
@@ -108,7 +125,7 @@ Erlaubte Scopes: `client`, `tauri`, `updater`, `ui`, `ci`, `docs`, `deps`,
 `release`. Scope ist optional (release-please erzeugt `chore(release): …`
 automatisch).
 
-### 5. Update testen
+### 6. Update testen
 
 1. v0.1.0 lokal installieren (Bundle aus dem Release).
 2. App starten → zeigt v0.1.0, „Auf Updates prüfen" → up-to-date.
