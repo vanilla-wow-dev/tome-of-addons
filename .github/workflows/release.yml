@@ -1,13 +1,28 @@
-name: Release
+name: release
 
 on:
   push:
-    tags:
-      - "v*.*.*"
+    branches:
+      - master
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
-  build:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+
+  build-tauri:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
     permissions:
       contents: write
     strategy:
@@ -57,18 +72,14 @@ jobs:
       - name: Install JS dependencies
         run: npm ci
 
-      - name: Build & publish
+      - name: Build & upload binaries
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Tome of Addons ${{ github.ref_name }}"
-          releaseBody: "See assets below. The `latest.json` file is consumed by the in-app updater."
-          releaseDraft: false
-          prerelease: false
+          tagName: ${{ needs.release-please.outputs.tag_name }}
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
           args: ${{ matrix.args }}

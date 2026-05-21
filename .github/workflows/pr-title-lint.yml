@@ -1,0 +1,39 @@
+name: "test:lint pull request CI"
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - edited
+      - synchronize
+
+permissions:
+  pull-requests: write
+  statuses: write
+
+jobs:
+  main:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+    if: ${{ github.actor != 'dependabot[bot]' }}
+    steps:
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          scopes: |
+            client
+            tauri
+            updater
+            ui
+            ci
+            docs
+            deps
+            release
+          requireScope: false
+          subjectPattern: ^(?![A-Z]).+$
+          subjectPatternError: |
+            The subject "{subject}" in the PR title "{title}" must start with a lowercase letter.
+          headerPattern: '^(\w*)(?:\(([\w$.\-*/ ]*)\))?: (.*)$'
+          headerPatternCorrespondence: type, scope, subject
+          wip: true

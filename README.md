@@ -64,27 +64,57 @@ Im GitHub-Repo unter Settings → Secrets and variables → Actions:
 | `TAURI_SIGNING_PRIVATE_KEY` | Inhalt von `~/.tauri/tome-of-addons.key` (komplette Datei) |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Passwort des Keys, leer wenn ohne Passwort erzeugt |
 
-### 4. Erstes Release
+Zusätzlich unter Settings → Actions → General → **Workflow permissions**:
+- „Read and write permissions" aktivieren
+- „Allow GitHub Actions to create and approve pull requests" aktivieren
 
-```bash
-git add .
-git commit -m "Initial prototype"
-git tag v0.1.0
-git push origin master --tags
-```
+Ohne diese Einstellung kann release-please seine Release-PR nicht öffnen.
 
-Der `Release`-Workflow läuft auf macOS, Linux, Windows parallel und
-veröffentlicht ein GitHub-Release mit:
-- Installer-Bundles (`.dmg`, `.AppImage`, `.deb`, `.msi`, `.exe`)
-- Signature-Dateien (`*.sig`)
-- `latest.json` — vom Updater-Plugin gepollt
+### 4. Release-Flow (release-please)
+
+Versionen werden **nicht manuell gebumpt**. Stattdessen orchestriert
+[release-please](https://github.com/googleapis/release-please) den ganzen
+Release-Vorgang basierend auf
+[Conventional Commits](https://www.conventionalcommits.org/).
+
+**Workflow:**
+
+1. Auf `master` committen mit konventionellem Format:
+   ```
+   feat(updater): add manual check button     # bumpt minor
+   fix(client): handle null guild correctly   # bumpt patch
+   feat(client)!: rename addon-id schema      # bumpt major
+   ```
+2. Push auf `master` → release-please öffnet (oder updated) eine
+   **Release-PR** mit:
+   - Bumps in `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`
+   - Generierter `CHANGELOG.md`-Eintrag
+3. PR reviewen, mergen → release-please:
+   - Erstellt Git-Tag `v0.1.1`
+   - Erstellt GitHub-Release mit Changelog
+4. Im selben Workflow-Run startet danach `build-tauri` (matrix: macOS arm64+x86_64,
+   Ubuntu, Windows) und hängt die signierten Binaries + `latest.json` an
+   das eben erstellte Release.
+
+Initiales `v0.1.0` Release: einfach den ersten konventionellen Commit auf master
+pushen — release-please erkennt das fehlende Tag und schlägt v0.1.0 als
+ersten Release vor.
+
+**PR-Title-Lint:** `pr-title-lint.yml` erzwingt Conventional-Commits-Format
+auf PR-Titeln (Squash-Merge übernimmt den PR-Titel als Commit-Message, daher
+genügt das für release-please).
+
+Erlaubte Scopes: `client`, `tauri`, `updater`, `ui`, `ci`, `docs`, `deps`,
+`release`. Scope ist optional (release-please erzeugt `chore(release): …`
+automatisch).
 
 ### 5. Update testen
 
 1. v0.1.0 lokal installieren (Bundle aus dem Release).
 2. App starten → zeigt v0.1.0, „Auf Updates prüfen" → up-to-date.
-3. `version` in `src-tauri/tauri.conf.json` und `package.json` auf `0.1.1` bumpen.
-4. `git tag v0.1.1 && git push --tags` → Release wird automatisch gebaut.
+3. Einen `fix`- oder `feat`-Commit auf master pushen.
+4. Release-PR von release-please mergen → v0.1.1 wird automatisch getaggt
+   und gebaut.
 5. Installierte v0.1.0 starten → „Auf Updates prüfen" → Banner „v0.1.1
    verfügbar" → Download → Restart → läuft als v0.1.1.
 
@@ -99,7 +129,11 @@ tome-of-addons/                # Repo-Slug auf GitHub
 │   ├── tauri.conf.json        # Updater-Endpoint + Pubkey
 │   ├── capabilities/default.json
 │   └── Cargo.toml
-├── .github/workflows/release.yml
+├── .github/workflows/
+│   ├── release.yml           # release-please + tauri-action matrix build
+│   └── pr-title-lint.yml     # conventional commit enforcement
+├── release-please-config.json
+├── .release-please-manifest.json
 └── package.json
 ```
 
