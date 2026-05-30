@@ -352,4 +352,20 @@ mod tests {
             normalize_path_key(r"c:\games\wow")
         );
     }
+
+    #[test]
+    fn detect_wow_roots_runs_without_panicking() {
+        // Übt die volle Kette (Walk-up via current_exe + Registry-No-Op + Dedup).
+        // Findet evtl. den echten WoW-Root (Test-Binary liegt darin) oder nichts —
+        // beides ist gültig; alle zurückgegebenen Roots müssen valide sein.
+        let roots = detect_wow_roots();
+        for r in &roots {
+            assert!(r.has_exe && r.has_mpq && r.has_interface);
+        }
+    }
+
+    #[test]
+    fn command_wrapper_matches_detect() {
+        assert_eq!(detect_wow_roots_command().len(), detect_wow_roots().len());
+    }
 }

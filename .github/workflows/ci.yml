@@ -29,8 +29,9 @@ jobs:
       - name: Typecheck
         run: npx vue-tsc --noEmit
 
-      - name: Test (Vitest)
-        run: npm test
+      # Schlägt fehl, wenn die Coverage-Schwellwerte (vitest.config.ts) unterschritten werden.
+      - name: Test + Coverage-Gate (Vitest)
+        run: npm run coverage
 
   rust:
     strategy:
@@ -57,7 +58,13 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -86,5 +93,14 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
+      # Ubuntu: Tests MIT Coverage-Gate (bricht unter den Schwellwerten ab).
+      - name: Test + Coverage-Gate
+        if: matrix.platform == 'ubuntu-22.04'
+        run: >
+          cargo llvm-cov --manifest-path src-tauri/Cargo.toml
+          --fail-under-lines 90 --fail-under-functions 90
+
+      # Windows: nur Compile + Test, damit der #[cfg(windows)]-Registry-Code abgedeckt ist.
       - name: Test
+        if: matrix.platform == 'windows-latest'
         run: cargo test --manifest-path src-tauri/Cargo.toml

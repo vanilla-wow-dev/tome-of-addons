@@ -275,4 +275,44 @@ mod tests {
         assert!(inspect_wow_exe(&root).is_err());
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    #[test]
+    fn build_string_skips_short_digit_runs() {
+        // Erstes "Build 12" hat nur 2 Ziffern → übersprungen; "Build 5875" zählt.
+        let (build, _) = parse_build_string(b"Build 12 then WoW Build 5875 (x)");
+        assert_eq!(build, Some(5875));
+    }
+
+    #[test]
+    fn build_string_without_parens_has_no_date() {
+        let (build, date) = parse_build_string(b"WoW Build 5875 ohne Klammern");
+        assert_eq!(build, Some(5875));
+        assert_eq!(date, None);
+    }
+
+    #[test]
+    fn build_string_with_unterminated_parens_has_no_date() {
+        // '(' aber kein ')' innerhalb der Grenze → Datum bleibt None.
+        let (build, date) = parse_build_string(b"WoW Build 5875 (no closing paren here");
+        assert_eq!(build, Some(5875));
+        assert_eq!(date, None);
+    }
+
+    #[test]
+    fn build_string_absent_returns_none() {
+        let (build, date) = parse_build_string(b"kein passender Marker hier drin");
+        assert_eq!(build, None);
+        assert_eq!(date, None);
+    }
+
+    #[test]
+    fn command_wrapper_inspects_exe() {
+        let bytes = b"WoW [Release] Build 5877 (Sep 19 2006 20:32:39)";
+        let root = fake_root_with_exe("cmd", bytes);
+        let info = inspect_wow_exe_command(root.to_string_lossy().into_owned())
+            .expect("command sollte gelingen");
+        assert_eq!(info.build, Some(5877));
+        assert!(inspect_wow_exe_command("/definitiv/kein/pfad".into()).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

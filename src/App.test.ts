@@ -103,6 +103,32 @@ describe("App – WoW-Erkennung", () => {
     await flushPromises();
     expect(wrapper.text()).toContain("WoW-Suche fehlgeschlagen");
   });
+
+  it("rendert den Root auch wenn die Exe-Analyse fehlschlägt", async () => {
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === "detect_wow_roots_command") return Promise.resolve([ROOT]);
+      if (cmd === "inspect_wow_exe_command") return Promise.reject(new Error("unlesbar"));
+      return Promise.resolve(null);
+    });
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.text()).toContain("/games/WoW");
+    // Kein Exe-Detailblock, aber kein Crash.
+    expect(wrapper.find(".exe").exists()).toBe(false);
+  });
+
+  it("rendert einen Root ohne AddOns-Ordner und ohne Build-Datum", async () => {
+    const root = { ...ROOT, has_addons: false };
+    const exe = { ...EXE, build_date: null, identity: { status: "unknown-build" } as const };
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === "detect_wow_roots_command") return Promise.resolve([root]);
+      if (cmd === "inspect_wow_exe_command") return Promise.resolve(exe);
+      return Promise.resolve(null);
+    });
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.text()).toContain("Unbekannter Build");
+  });
 });
 
 describe("App – Update-Flow", () => {
@@ -160,5 +186,39 @@ describe("App – Update-Flow", () => {
 
     await buttonByText(wrapper, "neustarten").trigger("click");
     expect(relaunch).toHaveBeenCalled();
+  });
+
+  it("zeigt Download-Fortschritt ohne bekannte Gesamtgröße", async () => {
+    let emit: ((e: any) => void) | null = null;
+    const downloadAndInstall = vi.fn((cb: (e: any) => void) => {
+      emit = cb;
+      return new Promise<void>(() => {}); // bleibt im Download-Status hängen
+    });
+    check.mockResolvedValue({ version: "0.2.0", downloadAndInstall });
+    const wrapper = mount(App);
+    await flushPromises();
+    await buttonByText(wrapper, "Auf Updates prüfen").trigger("click");
+    await flushPromises();
+    await buttonByText(wrapper, "herunterladen").trigger("click");
+    await flushPromises();
+
+    // Started ohne contentLength → total bleibt null (Zweig `?? null`).
+    emit!({ event: "Started", data: {} });
+    emit!({ event: "Progress", data: { chunkLength: 50 } });
+    await flushPromises();
+    expect(wrapper.text()).toContain("Lade…");
+    expect(wrapper.text()).not.toContain(" / "); // keine "x / y"-Anzeige ohne total
+  });
+
+  it("meldet einen fehlgeschlagenen Download", async () => {
+    const downloadAndInstall = vi.fn().mockRejectedValue(new Error("Plattenfehler"));
+    check.mockResolvedValue({ version: "0.2.0", downloadAndInstall });
+    const wrapper = mount(App);
+    await flushPromises();
+    await buttonByText(wrapper, "Auf Updates prüfen").trigger("click");
+    await flushPromises();
+    await buttonByText(wrapper, "herunterladen").trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("Download fehlgeschlagen");
   });
 });
