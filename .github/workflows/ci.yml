@@ -1,0 +1,90 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+# Laufende Runs bei neuem Push auf denselben Branch abbrechen.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx vue-tsc --noEmit
+
+      - name: Test (Vitest)
+        run: npm test
+
+  rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows ist zwingend, damit der #[cfg(windows)]-Registry-Code
+        # tatsächlich kompiliert und getestet wird; Ubuntu deckt den Rest ab.
+        platform: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      # tauri::generate_context! bettet das Frontend (frontendDist=../dist) zur
+      # Compile-Zeit ein — dist/ ist gitignored, daher hier bauen.
+      - name: Build frontend (dist for generate_context)
+        run: npm run build
+
+      - name: Format check
+        if: matrix.platform == 'ubuntu-22.04'
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
+
+      - name: Clippy
+        if: matrix.platform == 'ubuntu-22.04'
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --manifest-path src-tauri/Cargo.toml

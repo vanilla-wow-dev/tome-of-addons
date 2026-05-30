@@ -81,9 +81,7 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || haystack.len() < needle.len() {
         return None;
     }
-    haystack
-        .windows(needle.len())
-        .position(|w| w == needle)
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 /// Extrahiert Build-Nummer und (optional) Build-Datum aus dem eingebetteten
@@ -101,7 +99,9 @@ fn parse_build_string(bytes: &[u8]) -> (Option<u32>, Option<String>) {
         }
         let digits = &bytes[after..i];
         if digits.len() >= 4 {
-            let build = std::str::from_utf8(digits).ok().and_then(|s| s.parse().ok());
+            let build = std::str::from_utf8(digits)
+                .ok()
+                .and_then(|s| s.parse().ok());
             // Optionales Datum in Klammern direkt dahinter.
             let mut date = None;
             let mut j = i;
@@ -226,5 +226,53 @@ mod tests {
         // Der reale Fall dieser Installation: community-Build 5877, nicht in der Tabelle.
         let id = classify("abc123", Some(5877));
         assert_eq!(id, ExeIdentity::UnknownBuild);
+    }
+
+    /// Legt einen Temp-Root mit einer synthetischen WoW.exe aus `exe_bytes` an.
+    fn fake_root_with_exe(label: &str, exe_bytes: &[u8]) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("toa-exe-{}-{}", std::process::id(), label));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("WoW.exe"), exe_bytes).unwrap();
+        root
+    }
+
+    #[test]
+    fn inspect_reads_build_hashes_and_size_end_to_end() {
+        let bytes = b"prefix WoW [Release] Build 5877 (Sep 19 2006 20:32:39) suffix-padding-bytes";
+        let root = fake_root_with_exe("e2e", bytes);
+        let info = inspect_wow_exe(&root).expect("inspect sollte gelingen");
+        assert_eq!(info.build, Some(5877));
+        assert_eq!(info.build_date.as_deref(), Some("Sep 19 2006 20:32:39"));
+        assert_eq!(info.size_bytes, bytes.len() as u64);
+        assert_eq!(info.sha1.len(), 40);
+        assert_eq!(info.md5.len(), 32);
+        assert!(info.sha1.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(info.identity, ExeIdentity::UnknownBuild);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn inspect_flags_known_build_with_foreign_content_as_modified() {
+        // Behauptet Build 5875, Inhalt ist aber Müll → Hash weicht ab → modifiziert.
+        let bytes = b"WoW [Release] Build 5875 (Sep 19 2006 20:32:39) NOT-THE-REAL-BINARY";
+        let root = fake_root_with_exe("modified", bytes);
+        let info = inspect_wow_exe(&root).unwrap();
+        assert_eq!(
+            info.identity,
+            ExeIdentity::Modified {
+                claims_version: "1.12.1".into()
+            }
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn inspect_errors_when_exe_missing() {
+        let root = std::env::temp_dir().join(format!("toa-exe-{}-noexe", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(inspect_wow_exe(&root).is_err());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
