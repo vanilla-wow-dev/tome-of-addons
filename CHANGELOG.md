@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/vanilla-wow-dev/tome-of-addons/compare/v0.2.0...v0.2.1) (2026-05-31)
+
+
+### Bug Fixes
+
+* **client:** fix update mechanism ([#11](https://github.com/vanilla-wow-dev/tome-of-addons/issues/11)) ([c51cbea](https://github.com/vanilla-wow-dev/tome-of-addons/commit/c51cbea5323cc217a08e912ef0e16b9c0d23cdb3))
+
 ## [0.2.0](https://github.com/vanilla-wow-dev/tome-of-addons/compare/v0.1.0...v0.2.0) (2026-05-31)
 
 

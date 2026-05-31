@@ -1,6 +1,6 @@
 [package]
 name = "tome-of-addons"
-version = "0.2.0"
+version = "0.2.1"
 description = "Tome of Addons - WoW 1.12.1 addon manager"
 authors = ["Ulf Gebhardt"]
 edition = "2021"
