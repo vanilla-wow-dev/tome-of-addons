@@ -70,12 +70,9 @@ fn has_mpq_in_data(dir: &Path) -> bool {
         return false;
     };
     for entry in entries.flatten() {
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if let Some(ext) = name.rsplit('.').next() {
-            if ext.eq_ignore_ascii_case("mpq") {
-                return true;
-            }
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        if name.ends_with(".mpq") {
+            return true;
         }
     }
     false
@@ -209,12 +206,6 @@ fn dedup_roots(mut roots: Vec<WowRoot>) -> Vec<WowRoot> {
 /// Pfad-Schlüssel für Dedup: case-insensitiv + Trailing-Slash entfernt.
 fn normalize_path_key(path: &str) -> String {
     path.trim_end_matches(['/', '\\']).to_ascii_lowercase()
-}
-
-/// Tauri-Command: gibt die Liste validierter WoW-Roots an das Frontend.
-#[tauri::command]
-pub fn detect_wow_roots_command() -> Vec<WowRoot> {
-    detect_wow_roots()
 }
 
 #[cfg(test)]
@@ -365,7 +356,63 @@ mod tests {
     }
 
     #[test]
-    fn command_wrapper_matches_detect() {
-        assert_eq!(detect_wow_roots_command().len(), detect_wow_roots().len());
+    fn inspect_root_rejects_non_directory() {
+        let file = std::env::temp_dir().join(format!("toa-test-{}-file", std::process::id()));
+        let _ = fs::remove_file(&file);
+        fs::write(&file, b"x").unwrap();
+        assert!(inspect_root(&file, "test").is_none());
+        let _ = fs::remove_file(&file);
+    }
+
+    #[test]
+    fn data_as_file_is_not_valid() {
+        // "Data" existiert, ist aber eine Datei statt Verzeichnis.
+        let root = std::env::temp_dir().join(format!("toa-test-{}-datafile", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("Interface")).unwrap();
+        fs::write(root.join("WoW.exe"), b"x").unwrap();
+        fs::write(root.join("Data"), b"not a dir").unwrap();
+        assert!(inspect_root(&root, "test").is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn data_dir_with_only_non_mpq_is_not_valid() {
+        // Loop iteriert über eine Nicht-MPQ-Datei und fällt ohne Treffer durch.
+        let root = make_fake_root("nomqp", false);
+        fs::remove_file(root.join("Data").join("base.MPQ")).unwrap();
+        fs::write(root.join("Data").join("readme.txt"), b"x").unwrap();
+        assert!(inspect_root(&root, "test").is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn wow_root_serializes_for_frontend() {
+        // Übt die derive(Serialize)-Impl von WowRoot.
+        let root = WowRoot {
+            path: "/games/WoW".into(),
+            has_exe: true,
+            has_mpq: true,
+            has_interface: true,
+            has_addons: false,
+            method: "walkup".into(),
+        };
+        let json = serde_json::to_string(&root).unwrap();
+        assert!(json.contains("\"method\":\"walkup\""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_data_dir_is_not_valid() {
+        // Data ist ein Verzeichnis, aber nicht lesbar → read_dir schlägt fehl.
+        use std::os::unix::fs::PermissionsExt;
+        let root = make_fake_root("noperm", false);
+        let data = root.join("Data");
+        fs::set_permissions(&data, fs::Permissions::from_mode(0o000)).unwrap();
+        let result = inspect_root(&root, "test");
+        // Vor dem Assert Rechte zurücksetzen, damit der Temp-Ordner entfernbar bleibt.
+        fs::set_permissions(&data, fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = fs::remove_dir_all(&root);
+        assert!(result.is_none());
     }
 }

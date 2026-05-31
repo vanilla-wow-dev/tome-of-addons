@@ -170,12 +170,6 @@ pub fn inspect_wow_exe(root: &Path) -> Result<WowExeInfo, String> {
     })
 }
 
-/// Tauri-Command: analysiert die `WoW.exe` eines WoW-Roots.
-#[tauri::command]
-pub fn inspect_wow_exe_command(root: String) -> Result<WowExeInfo, String> {
-    inspect_wow_exe(Path::new(&root))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,13 +300,59 @@ mod tests {
     }
 
     #[test]
-    fn command_wrapper_inspects_exe() {
-        let bytes = b"WoW [Release] Build 5877 (Sep 19 2006 20:32:39)";
-        let root = fake_root_with_exe("cmd", bytes);
-        let info = inspect_wow_exe_command(root.to_string_lossy().into_owned())
-            .expect("command sollte gelingen");
-        assert_eq!(info.build, Some(5877));
-        assert!(inspect_wow_exe_command("/definitiv/kein/pfad".into()).is_err());
+    fn inspect_errors_when_exe_unreadable() {
+        // "WoW.exe" existiert, ist aber ein Verzeichnis → read() schlägt fehl
+        // (übt den map_err-Pfad, nicht nur das Nicht-Gefunden).
+        let root = std::env::temp_dir().join(format!("toa-exe-{}-dir", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("WoW.exe")).unwrap();
+        let err = inspect_wow_exe(&root).unwrap_err();
+        assert!(err.contains("nicht lesbar"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn build_string_input_shorter_than_needle() {
+        // Eingabe kürzer als "Build " → find_subslice nimmt den Längen-Early-Return.
+        let (build, date) = parse_build_string(b"abc");
+        assert_eq!(build, None);
+        assert_eq!(date, None);
+    }
+
+    #[test]
+    fn classify_no_build_no_match_is_unknown() {
+        // Weder Hash-Match noch Build-Nummer → letzter Fallback Unknown.
+        assert_eq!(classify("kein-match", None), ExeIdentity::Unknown);
+    }
+
+    #[test]
+    fn serializes_all_identity_variants_for_frontend() {
+        // Übt die derive(Serialize)-Impl (sonst nur über die Tauri-IPC erreicht).
+        let variants = [
+            ExeIdentity::Official {
+                version: "1.12.1".into(),
+                locale: "enUS".into(),
+            },
+            ExeIdentity::Modified {
+                claims_version: "1.12.1".into(),
+            },
+            ExeIdentity::UnknownBuild,
+            ExeIdentity::Unknown,
+        ];
+        for v in variants {
+            let info = WowExeInfo {
+                path: "/x/WoW.exe".into(),
+                size_bytes: 1,
+                build: Some(5875),
+                build_date: Some("d".into()),
+                sha1: "a".into(),
+                md5: "b".into(),
+                identity: v,
+            };
+            let json = serde_json::to_string(&info).unwrap();
+            assert!(json.contains("\"status\""));
+            // Clone + Debug der abgeleiteten Impls ausführen (sonst nie aufgerufen).
+            let _ = format!("{:?}", info.clone());
+        }
     }
 }
