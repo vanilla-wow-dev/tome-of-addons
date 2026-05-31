@@ -4,31 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { check, Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-
-interface WowRoot {
-  path: string;
-  has_exe: boolean;
-  has_mpq: boolean;
-  has_interface: boolean;
-  has_addons: boolean;
-  method: string;
-}
-
-type ExeIdentity =
-  | { status: "official"; version: string; locale: string }
-  | { status: "modified"; claims_version: string }
-  | { status: "unknown-build" }
-  | { status: "unknown" };
-
-interface WowExeInfo {
-  path: string;
-  size_bytes: number;
-  build: number | null;
-  build_date: string | null;
-  sha1: string;
-  md5: string;
-  identity: ExeIdentity;
-}
+import { type WowRoot, type WowExeInfo, identityLabel, fmtBytes } from "./wow";
 
 const wowRoots = ref<WowRoot[]>([]);
 const wowScanned = ref(false);
@@ -56,18 +32,6 @@ async function inspectExe(root: string) {
   }
 }
 
-function identityLabel(id: ExeIdentity): string {
-  switch (id.status) {
-    case "official":
-      return `✓ Offiziell ${id.version} (${id.locale})`;
-    case "modified":
-      return `⚠ Modifiziert (gibt sich als ${id.claims_version} aus)`;
-    case "unknown-build":
-      return "⚠ Unbekannter Build (kein offizieller Referenz-Hash)";
-    case "unknown":
-      return "✗ Kein erkennbarer WoW-Client";
-  }
-}
 
 type Status = "idle" | "checking" | "uptodate" | "available" | "downloading" | "ready" | "error";
 
@@ -124,12 +88,6 @@ async function installUpdate() {
 
 async function restartNow() {
   await relaunch();
-}
-
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 </script>
 
