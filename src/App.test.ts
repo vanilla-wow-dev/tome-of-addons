@@ -247,6 +247,33 @@ describe("App – Update-Flow (automatischer Check)", () => {
     expect(relaunch).toHaveBeenCalled();
   });
 
+  it("funktioniert mit einer Klasseninstanz mit privatem Feld (Regression #rid)", async () => {
+    // Reproduziert den Reaktivitäts-Bug: eine echte Klasse mit privatem Feld
+    // bricht, wenn sie in einem reaktiven ref (Proxy) statt shallowRef liegt.
+    class FakeUpdate {
+      #version: string;
+      version: string;
+      constructor(v: string) {
+        this.#version = v;
+        this.version = v;
+      }
+      async downloadAndInstall(cb: (e: any) => void) {
+        void this.#version; // wirft bei Proxy-`this`
+        cb({ event: "Started", data: { contentLength: 1 } });
+        cb({ event: "Finished" });
+      }
+    }
+    check.mockResolvedValue(new FakeUpdate("0.2.0"));
+    const wrapper = mount(App);
+    await flushPromises();
+
+    await buttonByText(wrapper, "herunterladen").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Neustart erforderlich");
+    expect(wrapper.text()).not.toContain("Download fehlgeschlagen");
+  });
+
   it("zeigt Download-Fortschritt ohne bekannte Gesamtgröße", async () => {
     let emit: ((e: any) => void) | null = null;
     const downloadAndInstall = vi.fn((cb: (e: any) => void) => {

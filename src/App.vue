@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, ref, shallowRef } from "vue";
 import { useI18n } from "vue-i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
@@ -69,7 +69,10 @@ const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const version = ref("");
 const status = ref<Status>("idle");
 const message = ref("");
-const pendingUpdate = ref<Update | null>(null);
+// shallowRef statt ref: der Update-Wert ist eine Tauri-Klasseninstanz mit
+// privaten Feldern (#rid). Ein reaktiver Proxy (ref) bricht deren Methoden
+// ("Cannot read private member …"); shallowRef hält die rohe Instanz.
+const pendingUpdate = shallowRef<Update | null>(null);
 const progress = ref<{ downloaded: number; total: number | null }>({ downloaded: 0, total: null });
 let updateTimer: ReturnType<typeof setInterval> | undefined;
 
