@@ -81,9 +81,7 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || haystack.len() < needle.len() {
         return None;
     }
-    haystack
-        .windows(needle.len())
-        .position(|w| w == needle)
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 /// Extrahiert Build-Nummer und (optional) Build-Datum aus dem eingebetteten
@@ -101,7 +99,9 @@ fn parse_build_string(bytes: &[u8]) -> (Option<u32>, Option<String>) {
         }
         let digits = &bytes[after..i];
         if digits.len() >= 4 {
-            let build = std::str::from_utf8(digits).ok().and_then(|s| s.parse().ok());
+            let build = std::str::from_utf8(digits)
+                .ok()
+                .and_then(|s| s.parse().ok());
             // Optionales Datum in Klammern direkt dahinter.
             let mut date = None;
             let mut j = i;
@@ -170,12 +170,6 @@ pub fn inspect_wow_exe(root: &Path) -> Result<WowExeInfo, String> {
     })
 }
 
-/// Tauri-Command: analysiert die `WoW.exe` eines WoW-Roots.
-#[tauri::command]
-pub fn inspect_wow_exe_command(root: String) -> Result<WowExeInfo, String> {
-    inspect_wow_exe(Path::new(&root))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,5 +220,139 @@ mod tests {
         // Der reale Fall dieser Installation: community-Build 5877, nicht in der Tabelle.
         let id = classify("abc123", Some(5877));
         assert_eq!(id, ExeIdentity::UnknownBuild);
+    }
+
+    /// Legt einen Temp-Root mit einer synthetischen WoW.exe aus `exe_bytes` an.
+    fn fake_root_with_exe(label: &str, exe_bytes: &[u8]) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("toa-exe-{}-{}", std::process::id(), label));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("WoW.exe"), exe_bytes).unwrap();
+        root
+    }
+
+    #[test]
+    fn inspect_reads_build_hashes_and_size_end_to_end() {
+        let bytes = b"prefix WoW [Release] Build 5877 (Sep 19 2006 20:32:39) suffix-padding-bytes";
+        let root = fake_root_with_exe("e2e", bytes);
+        let info = inspect_wow_exe(&root).expect("inspect sollte gelingen");
+        assert_eq!(info.build, Some(5877));
+        assert_eq!(info.build_date.as_deref(), Some("Sep 19 2006 20:32:39"));
+        assert_eq!(info.size_bytes, bytes.len() as u64);
+        assert_eq!(info.sha1.len(), 40);
+        assert_eq!(info.md5.len(), 32);
+        assert!(info.sha1.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(info.identity, ExeIdentity::UnknownBuild);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn inspect_flags_known_build_with_foreign_content_as_modified() {
+        // Behauptet Build 5875, Inhalt ist aber Müll → Hash weicht ab → modifiziert.
+        let bytes = b"WoW [Release] Build 5875 (Sep 19 2006 20:32:39) NOT-THE-REAL-BINARY";
+        let root = fake_root_with_exe("modified", bytes);
+        let info = inspect_wow_exe(&root).unwrap();
+        assert_eq!(
+            info.identity,
+            ExeIdentity::Modified {
+                claims_version: "1.12.1".into()
+            }
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn inspect_errors_when_exe_missing() {
+        let root = std::env::temp_dir().join(format!("toa-exe-{}-noexe", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(inspect_wow_exe(&root).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn build_string_skips_short_digit_runs() {
+        // Erstes "Build 12" hat nur 2 Ziffern → übersprungen; "Build 5875" zählt.
+        let (build, _) = parse_build_string(b"Build 12 then WoW Build 5875 (x)");
+        assert_eq!(build, Some(5875));
+    }
+
+    #[test]
+    fn build_string_without_parens_has_no_date() {
+        let (build, date) = parse_build_string(b"WoW Build 5875 ohne Klammern");
+        assert_eq!(build, Some(5875));
+        assert_eq!(date, None);
+    }
+
+    #[test]
+    fn build_string_with_unterminated_parens_has_no_date() {
+        // '(' aber kein ')' innerhalb der Grenze → Datum bleibt None.
+        let (build, date) = parse_build_string(b"WoW Build 5875 (no closing paren here");
+        assert_eq!(build, Some(5875));
+        assert_eq!(date, None);
+    }
+
+    #[test]
+    fn build_string_absent_returns_none() {
+        let (build, date) = parse_build_string(b"kein passender Marker hier drin");
+        assert_eq!(build, None);
+        assert_eq!(date, None);
+    }
+
+    #[test]
+    fn inspect_errors_when_exe_unreadable() {
+        // "WoW.exe" existiert, ist aber ein Verzeichnis → read() schlägt fehl
+        // (übt den map_err-Pfad, nicht nur das Nicht-Gefunden).
+        let root = std::env::temp_dir().join(format!("toa-exe-{}-dir", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("WoW.exe")).unwrap();
+        let err = inspect_wow_exe(&root).unwrap_err();
+        assert!(err.contains("nicht lesbar"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn build_string_input_shorter_than_needle() {
+        // Eingabe kürzer als "Build " → find_subslice nimmt den Längen-Early-Return.
+        let (build, date) = parse_build_string(b"abc");
+        assert_eq!(build, None);
+        assert_eq!(date, None);
+    }
+
+    #[test]
+    fn classify_no_build_no_match_is_unknown() {
+        // Weder Hash-Match noch Build-Nummer → letzter Fallback Unknown.
+        assert_eq!(classify("kein-match", None), ExeIdentity::Unknown);
+    }
+
+    #[test]
+    fn serializes_all_identity_variants_for_frontend() {
+        // Übt die derive(Serialize)-Impl (sonst nur über die Tauri-IPC erreicht).
+        let variants = [
+            ExeIdentity::Official {
+                version: "1.12.1".into(),
+                locale: "enUS".into(),
+            },
+            ExeIdentity::Modified {
+                claims_version: "1.12.1".into(),
+            },
+            ExeIdentity::UnknownBuild,
+            ExeIdentity::Unknown,
+        ];
+        for v in variants {
+            let info = WowExeInfo {
+                path: "/x/WoW.exe".into(),
+                size_bytes: 1,
+                build: Some(5875),
+                build_date: Some("d".into()),
+                sha1: "a".into(),
+                md5: "b".into(),
+                identity: v,
+            };
+            let json = serde_json::to_string(&info).unwrap();
+            assert!(json.contains("\"status\""));
+            // Clone + Debug der abgeleiteten Impls ausführen (sonst nie aufgerufen).
+            let _ = format!("{:?}", info.clone());
+        }
     }
 }
