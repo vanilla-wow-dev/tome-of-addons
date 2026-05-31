@@ -1,0 +1,62 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Tome of Addons — originäres App-Icon (eigene Arbeit, lizenzfrei). -->
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="75%">
+      <stop offset="0%" stop-color="#2c2c5a"/>
+      <stop offset="100%" stop-color="#15152e"/>
+    </radialGradient>
+    <linearGradient id="cover" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5050b0"/>
+      <stop offset="100%" stop-color="#33336e"/>
+    </linearGradient>
+    <linearGradient id="spine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#3a3a78"/>
+      <stop offset="100%" stop-color="#2a2a55"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f3d271"/>
+      <stop offset="100%" stop-color="#c79a2c"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Full-bleed Hintergrund (keine runden Ecken — das macht das OS). -->
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+
+  <!-- Seitenblock (lugt rechts/unten als Buchdicke hervor). -->
+  <rect x="296" y="214" width="476" height="612" rx="16" fill="#efe6cf"/>
+  <g stroke="#cdbf9a" stroke-width="6" opacity="0.8">
+    <line x1="744" y1="300" x2="744" y2="740"/>
+    <line x1="724" y1="300" x2="724" y2="740"/>
+    <line x1="704" y1="300" x2="704" y2="740"/>
+  </g>
+
+  <!-- Buchdeckel. -->
+  <rect x="252" y="190" width="476" height="612" rx="20" fill="url(#cover)"/>
+  <!-- Buchrücken. -->
+  <rect x="252" y="190" width="60" height="612" rx="20" fill="url(#spine)"/>
+  <rect x="300" y="190" width="10" height="612" fill="#26264e"/>
+
+  <!-- Goldener Zierrahmen. -->
+  <rect x="338" y="226" width="356" height="540" rx="12" fill="none" stroke="url(#gold)" stroke-width="10"/>
+
+  <!-- Eck-Ornamente. -->
+  <g fill="url(#gold)">
+    <path d="M362 250 h44 v12 h-32 v32 h-12 z"/>
+    <path d="M670 250 h-44 v12 h32 v32 h12 z"/>
+    <path d="M362 742 h44 v-12 h-32 v-32 h-12 z"/>
+    <path d="M670 742 h-44 v-12 h32 v-32 h12 z"/>
+  </g>
+
+  <!-- Arkane Vier-Strahl-Rune. -->
+  <polygon points="516,346 549,463 666,496 549,529 516,646 483,529 366,496 483,463"
+           fill="url(#gold)" stroke="#9a7420" stroke-width="6" stroke-linejoin="round"/>
+  <circle cx="516" cy="496" r="34" fill="#33336e" stroke="url(#gold)" stroke-width="8"/>
+
+  <!-- Funken in den Diagonalen. -->
+  <g fill="#f3d271">
+    <circle cx="612" cy="392" r="12"/>
+    <circle cx="612" cy="600" r="12"/>
+    <circle cx="420" cy="600" r="12"/>
+    <circle cx="420" cy="392" r="12"/>
+  </g>
+</svg>
