@@ -81,7 +81,7 @@ fn has_mpq_in_data(dir: &Path) -> bool {
 /// Pflicht-Marker (Exe + MPQ + Interface) erfüllt sind, sonst `None`.
 ///
 /// `method` beschreibt, über welche Strategie der Kandidat kam.
-fn inspect_root(path: &Path, method: &str) -> Option<WowRoot> {
+pub(crate) fn inspect_root(path: &Path, method: &str) -> Option<WowRoot> {
     if !path.is_dir() {
         return None;
     }
@@ -181,23 +181,42 @@ fn detect_via_registry() -> Vec<WowRoot> {
     Vec::new()
 }
 
-/// Führt alle Fund-Strategien aus und liefert validierte, deduplizierte
-/// Kandidaten — Walk-up zuerst (höchste Konfidenz), dann Registry.
-pub fn detect_wow_roots() -> Vec<WowRoot> {
-    // Verzweigungsfrei (`Option::into_iter`), damit jede Zeile unabhängig davon
-    // läuft, ob der Walk-up tatsächlich einen Root findet — sonst wäre die
-    // Coverage umgebungsabhängig (Binary innerhalb vs. außerhalb eines WoW-Ordners).
-    let mut roots: Vec<WowRoot> = detect_via_walkup().into_iter().collect();
-    roots.extend(detect_via_registry());
-    dedup_roots(roots)
+/// Ergebnis der Erkennung.
+///
+/// Determinismus-Prinzip: Der **Ort des Binaries ist die Konfiguration**. Der per
+/// Walk-up gefundene Root ist der *eine* gemanagte (`managed`); alle anderen Funde
+/// (Registry etc.) sind reine Vorschläge, *wohin* der Manager verschoben werden
+/// könnte (`suggestions`) — sie werden nie automatisch verwaltet. Damit ist auch
+/// bei mehreren WoW-Installationen immer eindeutig, welche verwaltet wird.
+#[derive(Serialize, Clone, Debug)]
+pub struct Detection {
+    /// Eindeutig gemanagter Root (Walk-up vom Binary). `None` = nicht verankert.
+    pub managed: Option<WowRoot>,
+    /// Weitere erkannte Installationen — Vorschläge zum Hinverschieben.
+    pub suggestions: Vec<WowRoot>,
 }
 
-/// Dedupliziert nach normalisiertem Pfad; erster Treffer (= höchste Konfidenz)
-/// gewinnt. Ausgelagert für Testbarkeit.
-fn dedup_roots(mut roots: Vec<WowRoot>) -> Vec<WowRoot> {
+/// Baut das Detection-Ergebnis: Walk-up ist autoritativ (= `managed`), alle
+/// übrigen Funde werden zu `suggestions` — dedupliziert und ohne den bereits
+/// gemanagten Pfad. Reine Funktion, deterministisch testbar.
+fn build_detection(walkup: Option<WowRoot>, others: Vec<WowRoot>) -> Detection {
     let mut seen = std::collections::HashSet::new();
-    roots.retain(|r| seen.insert(normalize_path_key(&r.path)));
-    roots
+    if let Some(root) = &walkup {
+        seen.insert(normalize_path_key(&root.path));
+    }
+    let suggestions = others
+        .into_iter()
+        .filter(|r| seen.insert(normalize_path_key(&r.path)))
+        .collect();
+    Detection {
+        managed: walkup,
+        suggestions,
+    }
+}
+
+/// Führt die Erkennung aus: Walk-up (autoritativ) + Registry (Vorschläge).
+pub fn detect() -> Detection {
+    build_detection(detect_via_walkup(), detect_via_registry())
 }
 
 /// Pfad-Schlüssel für Dedup: case-insensitiv + Trailing-Slash entfernt.
@@ -308,25 +327,48 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
-    #[test]
-    fn dedup_keeps_first_of_duplicate_paths() {
-        let mk = |path: &str, method: &str| WowRoot {
+    fn mk(path: &str, method: &str) -> WowRoot {
+        WowRoot {
             path: path.to_string(),
             has_exe: true,
             has_mpq: true,
             has_interface: true,
             has_addons: false,
             method: method.to_string(),
-        };
-        // Gleicher Pfad, andere Schreibweise + Trailing-Slash → ein Eintrag.
-        let roots = vec![
-            mk("/games/WoW", "walkup"),
+        }
+    }
+
+    #[test]
+    fn build_detection_walkup_is_managed_others_are_suggestions() {
+        let walkup = Some(mk("/games/WoW", "walkup"));
+        let others = vec![mk("/other/WoW", "registry"), mk("/third/WoW", "registry")];
+        let d = build_detection(walkup, others);
+        assert_eq!(d.managed.as_ref().unwrap().path, "/games/WoW");
+        assert_eq!(d.suggestions.len(), 2);
+    }
+
+    #[test]
+    fn build_detection_excludes_managed_path_and_dedups_suggestions() {
+        let walkup = Some(mk("/games/WoW", "walkup"));
+        // Gleicher Pfad wie managed (andere Schreibweise) + ein Duplikat.
+        let others = vec![
             mk("/games/wow/", "registry"),
             mk("/other/WoW", "registry"),
+            mk("/other/wow", "registry"),
         ];
-        let deduped = dedup_roots(roots);
-        assert_eq!(deduped.len(), 2);
-        assert_eq!(deduped[0].method, "walkup"); // erster gewinnt
+        let d = build_detection(walkup, others);
+        assert_eq!(d.suggestions.len(), 1);
+        assert_eq!(d.suggestions[0].path, "/other/WoW");
+    }
+
+    #[test]
+    fn build_detection_unanchored_keeps_all_suggestions() {
+        let d = build_detection(
+            None,
+            vec![mk("/a/WoW", "registry"), mk("/b/WoW", "registry")],
+        );
+        assert!(d.managed.is_none());
+        assert_eq!(d.suggestions.len(), 2);
     }
 
     #[test]
@@ -342,12 +384,11 @@ mod tests {
     }
 
     #[test]
-    fn detect_wow_roots_runs_without_panicking() {
-        // Reiner Integrations-Smoke (Walk-up via current_exe + Registry-No-Op +
-        // Dedup): läuft ohne Panic. Das Ergebnis ist umgebungsabhängig und wird
-        // hier bewusst NICHT iteriert — jede Iteration wäre env-abhängige Coverage.
-        // Validierung und Dedup sind separat deterministisch getestet.
-        let _ = detect_wow_roots();
+    fn detect_runs_without_panicking() {
+        // Reiner Integrations-Smoke (Walk-up via current_exe + Registry-No-Op).
+        // Ergebnis ist umgebungsabhängig und wird bewusst nicht inspiziert —
+        // die Aufteilungs-Logik ist über build_detection deterministisch getestet.
+        let _ = detect();
     }
 
     #[test]
