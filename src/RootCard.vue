@@ -1,10 +1,30 @@
 <script setup lang="ts">
-import { type WowRoot, type WowExeInfo, identityLabel } from "./wow";
+import { computed } from "vue";
+import { useI18n } from "vue-i18n";
+import { type WowRoot, type WowExeInfo } from "./wow";
 
-defineProps<{
+const props = defineProps<{
   root: WowRoot;
   exe?: WowExeInfo | null;
 }>();
+
+const { t } = useI18n();
+
+/** Lokalisiertes Verdikt zur Exe-Identität. */
+const identityText = computed(() => {
+  const id = props.exe?.identity;
+  if (!id) return "";
+  switch (id.status) {
+    case "official":
+      return t("exe.identity.official", { version: id.version, locale: id.locale });
+    case "modified":
+      return t("exe.identity.modified", { version: id.claims_version });
+    case "unknown-build":
+      return t("exe.identity.unknownBuild");
+    case "unknown":
+      return t("exe.identity.unknown");
+  }
+});
 </script>
 
 <template>
@@ -19,14 +39,14 @@ defineProps<{
     </span>
 
     <div v-if="exe" class="exe">
-      <p :class="['identity', exe.identity.status]">{{ identityLabel(exe.identity) }}</p>
+      <p :class="['identity', exe.identity.status]">{{ identityText }}</p>
       <dl>
-        <dt>Build</dt>
+        <dt>{{ t("exe.build") }}</dt>
         <dd>
           {{ exe.build ?? "—" }}
           <span v-if="exe.build_date" class="dim">({{ exe.build_date }})</span>
         </dd>
-        <dt>Größe</dt>
+        <dt>{{ t("exe.size") }}</dt>
         <dd>{{ exe.size_bytes.toLocaleString() }} B</dd>
         <dt>SHA-1</dt>
         <dd class="hash">{{ exe.sha1 }}</dd>

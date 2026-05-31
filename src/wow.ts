@@ -36,20 +36,6 @@ export interface Detection {
   suggestions: WowRoot[];
 }
 
-/** Menschlich lesbares Verdikt zur Exe-Identität. */
-export function identityLabel(id: ExeIdentity): string {
-  switch (id.status) {
-    case "official":
-      return `✓ Offiziell ${id.version} (${id.locale})`;
-    case "modified":
-      return `⚠ Modifiziert (gibt sich als ${id.claims_version} aus)`;
-    case "unknown-build":
-      return "⚠ Unbekannter Build (kein offizieller Referenz-Hash)";
-    case "unknown":
-      return "✗ Kein erkennbarer WoW-Client";
-  }
-}
-
 /** Formatiert eine Byte-Zahl als B/KB/MB. */
 export function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;

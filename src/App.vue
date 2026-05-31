@@ -1,11 +1,19 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { check, Update } from "@tauri-apps/plugin-updater";
 import { relaunch, exit } from "@tauri-apps/plugin-process";
 import { type WowRoot, type WowExeInfo, type Detection, fmtBytes } from "./wow";
+import { SUPPORTED_LOCALES, setLocale, type Locale } from "./i18n";
 import RootCard from "./RootCard.vue";
+
+const { t, locale } = useI18n();
+
+function onLanguageChange(event: Event) {
+  setLocale((event.target as HTMLSelectElement).value as Locale);
+}
 
 const managed = ref<WowRoot | null>(null);
 const suggestions = ref<WowRoot[]>([]);
@@ -29,7 +37,7 @@ async function detectWow() {
     );
     await Promise.all(roots.map((r) => inspectExe(r.path)));
   } catch (err) {
-    wowError.value = `WoW-Suche fehlgeschlagen: ${err}`;
+    wowError.value = t("wow.searchFailed", { err: String(err) });
   }
 }
 
@@ -42,13 +50,13 @@ async function inspectExe(root: string) {
 }
 
 async function relocateInto(targetRoot: string) {
-  relocateMsg.value = "Verschiebe…";
+  relocateMsg.value = t("relocate.inProgress");
   try {
     const dest = await invoke<string>("relocate_into_command", { targetRoot });
-    relocateMsg.value = `Manager nach ${dest} kopiert und dort gestartet. Diese Instanz wird geschlossen…`;
+    relocateMsg.value = t("relocate.done", { dest });
     await exit(0);
   } catch (err) {
-    relocateMsg.value = `Verschieben fehlgeschlagen: ${err}`;
+    relocateMsg.value = t("relocate.failed", { err: String(err) });
   }
 }
 
@@ -84,7 +92,7 @@ async function checkForUpdate() {
     if (update) {
       pendingUpdate.value = update;
       status.value = "available";
-      message.value = `Version ${update.version} verfügbar (aktuell ${version.value}).`;
+      message.value = t("update.available", { version: update.version, current: version.value });
     }
   } catch (err) {
     console.error("Update-Check fehlgeschlagen:", err);
@@ -103,12 +111,12 @@ async function installUpdate() {
         progress.value.downloaded += event.data.chunkLength;
       } else if (event.event === "Finished") {
         status.value = "ready";
-        message.value = "Update installiert. Neustart erforderlich.";
+        message.value = t("update.ready");
       }
     });
   } catch (err) {
     status.value = "error";
-    message.value = `Download fehlgeschlagen: ${err}`;
+    message.value = t("update.downloadFailed", { err: String(err) });
   }
 }
 
@@ -119,8 +127,17 @@ async function restartNow() {
 
 <template>
   <main class="container">
+    <div class="topbar">
+      <label class="lang">
+        <span class="sr-only">{{ t("language") }}</span>
+        <select :value="locale" aria-label="language" @change="onLanguageChange">
+          <option v-for="l in SUPPORTED_LOCALES" :key="l" :value="l">{{ l.toUpperCase() }}</option>
+        </select>
+      </label>
+    </div>
+
     <h1>Tome of Addons</h1>
-    <p class="tagline">The curated tome of WoW 1.12.1 addons.</p>
+    <p class="tagline">{{ t("tagline") }}</p>
     <p class="version">v{{ version || "…" }}</p>
 
     <section class="wow">
@@ -129,42 +146,30 @@ async function restartNow() {
       <template v-else-if="wowScanned">
         <!-- Zustand 1: verankert — diese Installation wird verwaltet. -->
         <div v-if="managed">
-          <p class="section-label ok">Verwaltet</p>
+          <p class="section-label ok">{{ t("wow.managed") }}</p>
           <RootCard :root="managed" :exe="exeInfo[managed.path]" />
 
           <div v-if="suggestions.length" class="others">
-            <p class="section-label">Weitere erkannte Installationen (nicht verwaltet)</p>
-            <p class="hint">
-              Um eine andere zu verwalten, verschiebe den Manager dorthin.
-            </p>
+            <p class="section-label">{{ t("wow.others") }}</p>
+            <p class="hint">{{ t("wow.moveHint") }}</p>
             <div v-for="s in suggestions" :key="s.path" class="suggestion">
               <RootCard :root="s" :exe="exeInfo[s.path]" />
-              <button type="button" @click="relocateInto(s.path)">
-                Manager hierher verschieben
-              </button>
+              <button type="button" @click="relocateInto(s.path)">{{ t("wow.moveHere") }}</button>
             </div>
           </div>
         </div>
 
         <!-- Zustand 2: nicht verankert, aber Installationen erkannt. -->
         <div v-else-if="suggestions.length" class="unanchored">
-          <p class="message warn">
-            Tome of Addons liegt nicht in einem WoW-Ordner und verwaltet daher noch
-            keine Installation. Erkannt wurde:
-          </p>
+          <p class="message warn">{{ t("wow.unanchored") }}</p>
           <div v-for="s in suggestions" :key="s.path" class="suggestion">
             <RootCard :root="s" :exe="exeInfo[s.path]" />
-            <button type="button" @click="relocateInto(s.path)">
-              Manager hierher verschieben
-            </button>
+            <button type="button" @click="relocateInto(s.path)">{{ t("wow.moveHere") }}</button>
           </div>
         </div>
 
         <!-- Zustand 3: nichts gefunden. -->
-        <p v-else class="message">
-          Keine WoW-1.12.1-Installation gefunden. Lege den Manager in deinen
-          WoW-Ordner und starte ihn dort.
-        </p>
+        <p v-else class="message">{{ t("wow.none") }}</p>
 
         <p v-if="relocateMsg" class="message">{{ relocateMsg }}</p>
       </template>
@@ -173,19 +178,19 @@ async function restartNow() {
     <p v-if="message" :class="['message', status]">{{ message }}</p>
 
     <div v-if="status === 'available'" class="banner">
-      <button type="button" @click="installUpdate">Update herunterladen &amp; installieren</button>
+      <button type="button" @click="installUpdate">{{ t("update.download") }}</button>
     </div>
 
     <div v-if="status === 'downloading'" class="banner">
       <p>
-        Lade…
+        {{ t("update.downloading") }}
         {{ fmtBytes(progress.downloaded) }}
         <span v-if="progress.total"> / {{ fmtBytes(progress.total) }}</span>
       </p>
     </div>
 
     <div v-if="status === 'ready'" class="banner ready">
-      <button type="button" @click="restartNow">Jetzt neustarten</button>
+      <button type="button" @click="restartNow">{{ t("update.restart") }}</button>
     </div>
   </main>
 </template>
@@ -196,6 +201,38 @@ async function restartNow() {
   margin: 0 auto;
   padding: 6vh 2em;
   text-align: center;
+}
+
+.topbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.lang select {
+  font-size: 0.85em;
+  padding: 0.25em 0.5em;
+  border-radius: 6px;
+  border: 1px solid #c0c0c0;
+  background: #fff;
+  color: #1a1a1a;
+  cursor: pointer;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-color-scheme: dark) {
+  .lang select {
+    background: #2a2a2a;
+    color: #f0f0f0;
+    border-color: #444;
+  }
 }
 
 .tagline {

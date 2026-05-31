@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
+import { mount, flushPromises, config, type VueWrapper } from "@vue/test-utils";
 import type { Detection, WowExeInfo, WowRoot } from "./wow";
+import { i18n, setLocale } from "./i18n";
+
+// i18n-Plugin global bereitstellen; Tests laufen auf Deutsch.
+config.global.plugins = [i18n];
 
 // Tauri-APIs mocken. vi.hoisted, damit die Mock-Fns vor den vi.mock-Factories existieren.
 const { invoke, getVersion, check, relaunch, exit } = vi.hoisted(() => ({
@@ -66,6 +70,7 @@ function buttonByText(wrapper: VueWrapper, text: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  setLocale("de");
   getVersion.mockResolvedValue("0.1.0");
   check.mockResolvedValue(null);
   exit.mockResolvedValue(undefined);
@@ -136,6 +141,16 @@ describe("App – Nicht verankert", () => {
     const wrapper = mount(App);
     await flushPromises();
     expect(wrapper.text()).toContain("Keine WoW-1.12.1-Installation gefunden");
+  });
+
+  it("wechselt die UI-Sprache über den Umschalter", async () => {
+    mockInvoke({ managed: null, suggestions: [] });
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.text()).toContain("Keine WoW-1.12.1-Installation gefunden");
+
+    await wrapper.find("select[aria-label='language']").setValue("en");
+    expect(wrapper.text()).toContain("No WoW 1.12.1 installation found");
   });
 
   it("zeigt einen Fehler, wenn die Erkennung wirft", async () => {
