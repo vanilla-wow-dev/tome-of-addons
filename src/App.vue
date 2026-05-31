@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { check, Update } from "@tauri-apps/plugin-updater";
@@ -53,35 +53,41 @@ async function relocateInto(targetRoot: string) {
 }
 
 
-type Status = "idle" | "checking" | "uptodate" | "available" | "downloading" | "ready" | "error";
+type Status = "idle" | "available" | "downloading" | "ready" | "error";
+
+// Intervall des automatischen Hintergrund-Checks (Start + alle 24 h).
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 const version = ref("");
 const status = ref<Status>("idle");
 const message = ref("");
 const pendingUpdate = ref<Update | null>(null);
 const progress = ref<{ downloaded: number; total: number | null }>({ downloaded: 0, total: null });
+let updateTimer: ReturnType<typeof setInterval> | undefined;
 
 onMounted(async () => {
   version.value = await getVersion();
   await detectWow();
+  await checkForUpdate();
+  updateTimer = setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL_MS);
 });
 
+onUnmounted(() => {
+  if (updateTimer) clearInterval(updateTimer);
+});
+
+// Automatischer Hintergrund-Check: meldet NUR, wenn ein Update verfügbar ist.
+// „Kein Update" und Fehler bleiben still (kein Nerven) — Fehler nur ins Log.
 async function checkForUpdate() {
-  status.value = "checking";
-  message.value = "";
   try {
     const update = await check();
     if (update) {
       pendingUpdate.value = update;
       status.value = "available";
       message.value = `Version ${update.version} verfügbar (aktuell ${version.value}).`;
-    } else {
-      status.value = "uptodate";
-      message.value = "Du bist auf dem neuesten Stand.";
     }
   } catch (err) {
-    status.value = "error";
-    message.value = `Update-Check fehlgeschlagen: ${err}`;
+    console.error("Update-Check fehlgeschlagen:", err);
   }
 }
 
@@ -116,16 +122,6 @@ async function restartNow() {
     <h1>Tome of Addons</h1>
     <p class="tagline">The curated tome of WoW 1.12.1 addons.</p>
     <p class="version">v{{ version || "…" }}</p>
-
-    <div class="actions">
-      <button
-        type="button"
-        :disabled="status === 'checking' || status === 'downloading'"
-        @click="checkForUpdate"
-      >
-        {{ status === "checking" ? "Prüfe…" : "Auf Updates prüfen" }}
-      </button>
-    </div>
 
     <section class="wow">
       <p v-if="wowError" class="message error">{{ wowError }}</p>
@@ -213,13 +209,6 @@ async function restartNow() {
   color: #888;
 }
 
-.actions {
-  margin: 2em 0 1em;
-  display: flex;
-  gap: 0.75em;
-  justify-content: center;
-}
-
 .wow {
   margin: 1.5em auto;
   max-width: 560px;
@@ -269,10 +258,6 @@ async function restartNow() {
 
 .message.error {
   color: #c0392b;
-}
-
-.message.uptodate {
-  color: #27ae60;
 }
 
 .banner {

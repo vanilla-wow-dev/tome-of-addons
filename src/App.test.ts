@@ -175,42 +175,44 @@ describe("App – Verschieben-Aktion", () => {
   });
 });
 
-describe("App – Update-Flow", () => {
-  it("meldet ein verfügbares Update", async () => {
+describe("App – Update-Flow (automatischer Check)", () => {
+  it("prüft automatisch beim Start und zeigt den Banner bei verfügbarem Update", async () => {
     check.mockResolvedValue({ version: "0.2.0", downloadAndInstall: vi.fn() });
     const wrapper = mount(App);
     await flushPromises();
 
-    await buttonByText(wrapper, "Auf Updates prüfen").trigger("click");
-    await flushPromises();
-
+    expect(check).toHaveBeenCalled();
     expect(wrapper.text()).toContain("0.2.0");
     expect(buttonByText(wrapper, "herunterladen")).toBeTruthy();
   });
 
-  it("meldet, wenn aktuell", async () => {
+  it("bleibt still, wenn kein Update vorliegt", async () => {
     check.mockResolvedValue(null);
     const wrapper = mount(App);
     await flushPromises();
 
-    await buttonByText(wrapper, "Auf Updates prüfen").trigger("click");
-    await flushPromises();
-
-    expect(wrapper.text()).toContain("neuesten Stand");
+    expect(check).toHaveBeenCalled();
+    expect(wrapper.find(".banner").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("0.2.0");
   });
 
-  it("meldet einen fehlgeschlagenen Update-Check", async () => {
+  it("bleibt still, wenn der Check fehlschlägt", async () => {
     check.mockRejectedValue(new Error("kein Netz"));
     const wrapper = mount(App);
     await flushPromises();
 
-    await buttonByText(wrapper, "Auf Updates prüfen").trigger("click");
-    await flushPromises();
-
-    expect(wrapper.text()).toContain("Update-Check fehlgeschlagen");
+    expect(wrapper.find(".banner").exists()).toBe(false);
+    // Kein sichtbarer Fehler-Hinweis bei Hintergrund-Check.
+    expect(wrapper.text()).not.toContain("fehlgeschlagen");
   });
 
-  it("führt Download + Restart-Flow durch", async () => {
+  it("räumt das Check-Intervall beim Unmount auf", async () => {
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(() => wrapper.unmount()).not.toThrow();
+  });
+
+  it("lädt auf Klick herunter und führt den Restart-Flow durch", async () => {
     const downloadAndInstall = vi.fn(async (cb: (e: any) => void) => {
       cb({ event: "Started", data: { contentLength: 100 } });
       cb({ event: "Progress", data: { chunkLength: 100 } });
@@ -220,8 +222,6 @@ describe("App – Update-Flow", () => {
     const wrapper = mount(App);
     await flushPromises();
 
-    await buttonByText(wrapper, "Auf Updates prüfen").trigger("click");
-    await flushPromises();
     await buttonByText(wrapper, "herunterladen").trigger("click");
     await flushPromises();
 
@@ -241,8 +241,6 @@ describe("App – Update-Flow", () => {
     check.mockResolvedValue({ version: "0.2.0", downloadAndInstall });
     const wrapper = mount(App);
     await flushPromises();
-    await buttonByText(wrapper, "Auf Updates prüfen").trigger("click");
-    await flushPromises();
     await buttonByText(wrapper, "herunterladen").trigger("click");
     await flushPromises();
 
@@ -257,8 +255,6 @@ describe("App – Update-Flow", () => {
     const downloadAndInstall = vi.fn().mockRejectedValue(new Error("Plattenfehler"));
     check.mockResolvedValue({ version: "0.2.0", downloadAndInstall });
     const wrapper = mount(App);
-    await flushPromises();
-    await buttonByText(wrapper, "Auf Updates prüfen").trigger("click");
     await flushPromises();
     await buttonByText(wrapper, "herunterladen").trigger("click");
     await flushPromises();
