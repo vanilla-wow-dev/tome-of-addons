@@ -125,7 +125,6 @@ async function restartNow() {
       >
         {{ status === "checking" ? "Prüfe…" : "Auf Updates prüfen" }}
       </button>
-      <button type="button" @click="detectWow">WoW-Verzeichnis suchen</button>
     </div>
 
     <section class="wow">
