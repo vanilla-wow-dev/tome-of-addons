@@ -26,6 +26,16 @@ export interface WowExeInfo {
   identity: ExeIdentity;
 }
 
+/**
+ * Ergebnis der Erkennung. `managed` = der eindeutig verwaltete Root (Walk-up vom
+ * Binary); `suggestions` = weitere erkannte Installationen, in die der Manager
+ * verschoben werden kann. Siehe Determinismus-Prinzip im Rust-`wow.rs`.
+ */
+export interface Detection {
+  managed: WowRoot | null;
+  suggestions: WowRoot[];
+}
+
 /** Menschlich lesbares Verdikt zur Exe-Identität. */
 export function identityLabel(id: ExeIdentity): string {
   switch (id.status) {

@@ -1,19 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mount, flushPromises, type VueWrapper } from "@vue/test-utils";
-import type { WowExeInfo, WowRoot } from "./wow";
+import type { Detection, WowExeInfo, WowRoot } from "./wow";
 
 // Tauri-APIs mocken. vi.hoisted, damit die Mock-Fns vor den vi.mock-Factories existieren.
-const { invoke, getVersion, check, relaunch } = vi.hoisted(() => ({
+const { invoke, getVersion, check, relaunch, exit } = vi.hoisted(() => ({
   invoke: vi.fn(),
   getVersion: vi.fn(),
   check: vi.fn(),
   relaunch: vi.fn(),
+  exit: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion }));
 vi.mock("@tauri-apps/plugin-updater", () => ({ check, Update: class {} }));
-vi.mock("@tauri-apps/plugin-process", () => ({ relaunch }));
+vi.mock("@tauri-apps/plugin-process", () => ({ relaunch, exit }));
 
 import App from "./App.vue";
 
@@ -26,6 +27,15 @@ const ROOT: WowRoot = {
   method: "walkup",
 };
 
+const OTHER: WowRoot = {
+  path: "/other/WoW",
+  has_exe: true,
+  has_mpq: true,
+  has_interface: true,
+  has_addons: false,
+  method: "registry",
+};
+
 const EXE: WowExeInfo = {
   path: "/games/WoW/WoW.exe",
   size_bytes: 4775986,
@@ -36,25 +46,30 @@ const EXE: WowExeInfo = {
   identity: { status: "official", version: "1.12.1", locale: "enUS" },
 };
 
-/** Standard-Mock-Verhalten: Version gesetzt, keine Roots, kein Update. */
-function setDefaults() {
-  getVersion.mockResolvedValue("0.1.0");
-  check.mockResolvedValue(null);
+/** invoke-Mock, das per Command-Namen verzweigt. */
+function mockInvoke(detection: Detection, opts: { exeFails?: boolean; relocateFails?: boolean } = {}) {
   invoke.mockImplementation((cmd: string) => {
-    if (cmd === "detect_wow_roots_command") return Promise.resolve([]);
-    if (cmd === "inspect_wow_exe_command") return Promise.resolve(EXE);
+    if (cmd === "detect_command") return Promise.resolve(detection);
+    if (cmd === "inspect_wow_exe_command")
+      return opts.exeFails ? Promise.reject(new Error("unlesbar")) : Promise.resolve(EXE);
+    if (cmd === "relocate_into_command")
+      return opts.relocateFails
+        ? Promise.reject(new Error("Plattenfehler"))
+        : Promise.resolve("/other/WoW/tome-of-addons");
     return Promise.resolve(null);
   });
 }
 
-/** Findet einen Button anhand seines Textinhalts. */
 function buttonByText(wrapper: VueWrapper, text: string) {
   return wrapper.findAll("button").find((b) => b.text().includes(text))!;
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  setDefaults();
+  getVersion.mockResolvedValue("0.1.0");
+  check.mockResolvedValue(null);
+  exit.mockResolvedValue(undefined);
+  mockInvoke({ managed: null, suggestions: [] });
 });
 
 describe("App – Mount & Version", () => {
@@ -65,69 +80,98 @@ describe("App – Mount & Version", () => {
     expect(wrapper.find(".version").text()).toBe("v1.2.3");
   });
 
-  it("löst die WoW-Erkennung beim Start aus", async () => {
+  it("löst die Erkennung beim Start aus", async () => {
     mount(App);
     await flushPromises();
-    expect(invoke).toHaveBeenCalledWith("detect_wow_roots_command");
+    expect(invoke).toHaveBeenCalledWith("detect_command");
   });
 });
 
-describe("App – WoW-Erkennung", () => {
-  it("rendert gefundene Roots inkl. Exe-Verdikt", async () => {
-    invoke.mockImplementation((cmd: string) => {
-      if (cmd === "detect_wow_roots_command") return Promise.resolve([ROOT]);
-      if (cmd === "inspect_wow_exe_command") return Promise.resolve(EXE);
-      return Promise.resolve(null);
-    });
+describe("App – Verankert (managed)", () => {
+  it("zeigt die verwaltete Installation inkl. Exe-Verdikt", async () => {
+    mockInvoke({ managed: ROOT, suggestions: [] });
     const wrapper = mount(App);
     await flushPromises();
 
+    expect(wrapper.text()).toContain("Verwaltet");
     expect(wrapper.text()).toContain("/games/WoW");
     expect(wrapper.text()).toContain("✓ Offiziell 1.12.1 (enUS)");
-    expect(wrapper.text()).toContain("5875");
-    expect(wrapper.text()).toContain(EXE.sha1);
   });
 
-  it("zeigt eine Meldung, wenn nichts gefunden wird", async () => {
+  it("listet weitere Funde als „nicht verwaltet“ und kann dorthin verschieben", async () => {
+    mockInvoke({ managed: ROOT, suggestions: [OTHER] });
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("nicht verwaltet");
+    expect(wrapper.text()).toContain("/other/WoW");
+
+    await buttonByText(wrapper, "hierher verschieben").trigger("click");
+    await flushPromises();
+    expect(invoke).toHaveBeenCalledWith("relocate_into_command", { targetRoot: "/other/WoW" });
+  });
+
+  it("rendert den Root auch wenn die Exe-Analyse fehlschlägt", async () => {
+    mockInvoke({ managed: ROOT, suggestions: [] }, { exeFails: true });
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.text()).toContain("/games/WoW");
+    expect(wrapper.find(".exe").exists()).toBe(false);
+  });
+});
+
+describe("App – Nicht verankert", () => {
+  it("warnt und bietet die erkannten Installationen zum Verschieben an", async () => {
+    mockInvoke({ managed: null, suggestions: [OTHER] });
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("nicht in einem WoW-Ordner");
+    expect(wrapper.text()).toContain("/other/WoW");
+    expect(buttonByText(wrapper, "hierher verschieben")).toBeTruthy();
+  });
+
+  it("zeigt einen Hinweis, wenn gar nichts gefunden wird", async () => {
+    mockInvoke({ managed: null, suggestions: [] });
     const wrapper = mount(App);
     await flushPromises();
     expect(wrapper.text()).toContain("Keine WoW-1.12.1-Installation gefunden");
   });
 
   it("zeigt einen Fehler, wenn die Erkennung wirft", async () => {
-    invoke.mockImplementation((cmd: string) => {
-      if (cmd === "detect_wow_roots_command") return Promise.reject(new Error("boom"));
-      return Promise.resolve(null);
-    });
+    invoke.mockImplementation((cmd: string) =>
+      cmd === "detect_command" ? Promise.reject(new Error("boom")) : Promise.resolve(null),
+    );
     const wrapper = mount(App);
     await flushPromises();
     expect(wrapper.text()).toContain("WoW-Suche fehlgeschlagen");
   });
+});
 
-  it("rendert den Root auch wenn die Exe-Analyse fehlschlägt", async () => {
-    invoke.mockImplementation((cmd: string) => {
-      if (cmd === "detect_wow_roots_command") return Promise.resolve([ROOT]);
-      if (cmd === "inspect_wow_exe_command") return Promise.reject(new Error("unlesbar"));
-      return Promise.resolve(null);
-    });
+describe("App – Verschieben-Aktion", () => {
+  it("kopiert in den Zielordner und schließt die Instanz", async () => {
+    mockInvoke({ managed: null, suggestions: [OTHER] });
     const wrapper = mount(App);
     await flushPromises();
-    expect(wrapper.text()).toContain("/games/WoW");
-    // Kein Exe-Detailblock, aber kein Crash.
-    expect(wrapper.find(".exe").exists()).toBe(false);
+
+    await buttonByText(wrapper, "hierher verschieben").trigger("click");
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("relocate_into_command", { targetRoot: "/other/WoW" });
+    expect(exit).toHaveBeenCalledWith(0);
+    expect(wrapper.text()).toContain("kopiert");
   });
 
-  it("rendert einen Root ohne AddOns-Ordner und ohne Build-Datum", async () => {
-    const root = { ...ROOT, has_addons: false };
-    const exe = { ...EXE, build_date: null, identity: { status: "unknown-build" } as const };
-    invoke.mockImplementation((cmd: string) => {
-      if (cmd === "detect_wow_roots_command") return Promise.resolve([root]);
-      if (cmd === "inspect_wow_exe_command") return Promise.resolve(exe);
-      return Promise.resolve(null);
-    });
+  it("meldet einen Fehlschlag beim Verschieben", async () => {
+    mockInvoke({ managed: null, suggestions: [OTHER] }, { relocateFails: true });
     const wrapper = mount(App);
     await flushPromises();
-    expect(wrapper.text()).toContain("Unbekannter Build");
+
+    await buttonByText(wrapper, "hierher verschieben").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Verschieben fehlgeschlagen");
+    expect(exit).not.toHaveBeenCalled();
   });
 });
 
@@ -192,7 +236,7 @@ describe("App – Update-Flow", () => {
     let emit: ((e: any) => void) | null = null;
     const downloadAndInstall = vi.fn((cb: (e: any) => void) => {
       emit = cb;
-      return new Promise<void>(() => {}); // bleibt im Download-Status hängen
+      return new Promise<void>(() => {});
     });
     check.mockResolvedValue({ version: "0.2.0", downloadAndInstall });
     const wrapper = mount(App);
@@ -202,12 +246,11 @@ describe("App – Update-Flow", () => {
     await buttonByText(wrapper, "herunterladen").trigger("click");
     await flushPromises();
 
-    // Started ohne contentLength → total bleibt null (Zweig `?? null`).
     emit!({ event: "Started", data: {} });
     emit!({ event: "Progress", data: { chunkLength: 50 } });
     await flushPromises();
     expect(wrapper.text()).toContain("Lade…");
-    expect(wrapper.text()).not.toContain(" / "); // keine "x / y"-Anzeige ohne total
+    expect(wrapper.text()).not.toContain(" / ");
   });
 
   it("meldet einen fehlgeschlagenen Download", async () => {

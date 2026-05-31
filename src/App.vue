@@ -3,22 +3,31 @@ import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { check, Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { type WowRoot, type WowExeInfo, identityLabel, fmtBytes } from "./wow";
+import { relaunch, exit } from "@tauri-apps/plugin-process";
+import { type WowRoot, type WowExeInfo, type Detection, fmtBytes } from "./wow";
+import RootCard from "./RootCard.vue";
 
-const wowRoots = ref<WowRoot[]>([]);
+const managed = ref<WowRoot | null>(null);
+const suggestions = ref<WowRoot[]>([]);
 const wowScanned = ref(false);
 const wowError = ref("");
 const exeInfo = ref<Record<string, WowExeInfo>>({});
+const relocateMsg = ref("");
 
 async function detectWow() {
   wowError.value = "";
   wowScanned.value = false;
+  relocateMsg.value = "";
   exeInfo.value = {};
   try {
-    wowRoots.value = await invoke<WowRoot[]>("detect_wow_roots_command");
+    const detection = await invoke<Detection>("detect_command");
+    managed.value = detection.managed;
+    suggestions.value = detection.suggestions;
     wowScanned.value = true;
-    await Promise.all(wowRoots.value.map((r) => inspectExe(r.path)));
+    const roots = [detection.managed, ...detection.suggestions].filter(
+      (r): r is WowRoot => r !== null,
+    );
+    await Promise.all(roots.map((r) => inspectExe(r.path)));
   } catch (err) {
     wowError.value = `WoW-Suche fehlgeschlagen: ${err}`;
   }
@@ -29,6 +38,17 @@ async function inspectExe(root: string) {
     exeInfo.value[root] = await invoke<WowExeInfo>("inspect_wow_exe_command", { root });
   } catch {
     // WoW.exe nicht lesbar — Detailbereich bleibt einfach leer.
+  }
+}
+
+async function relocateInto(targetRoot: string) {
+  relocateMsg.value = "Verschiebe…";
+  try {
+    const dest = await invoke<string>("relocate_into_command", { targetRoot });
+    relocateMsg.value = `Manager nach ${dest} kopiert und dort gestartet. Diese Instanz wird geschlossen…`;
+    await exit(0);
+  } catch (err) {
+    relocateMsg.value = `Verschieben fehlgeschlagen: ${err}`;
   }
 }
 
@@ -110,41 +130,48 @@ async function restartNow() {
 
     <section class="wow">
       <p v-if="wowError" class="message error">{{ wowError }}</p>
-      <template v-else-if="wowScanned">
-        <p v-if="wowRoots.length === 0" class="message">
-          Keine WoW-1.12.1-Installation gefunden.
-        </p>
-        <ul v-else class="roots">
-          <li v-for="root in wowRoots" :key="root.path" class="root">
-            <code class="path">{{ root.path }}</code>
-            <span class="method">{{ root.method }}</span>
-            <span class="markers">
-              <span :class="{ ok: root.has_exe }">WoW.exe</span>
-              <span :class="{ ok: root.has_mpq }">MPQ</span>
-              <span :class="{ ok: root.has_interface }">Interface</span>
-              <span :class="{ ok: root.has_addons }">AddOns</span>
-            </span>
 
-            <div v-if="exeInfo[root.path]" class="exe">
-              <p :class="['identity', exeInfo[root.path].identity.status]">
-                {{ identityLabel(exeInfo[root.path].identity) }}
-              </p>
-              <dl>
-                <dt>Build</dt>
-                <dd>{{ exeInfo[root.path].build ?? "—" }}
-                  <span v-if="exeInfo[root.path].build_date" class="dim">
-                    ({{ exeInfo[root.path].build_date }})</span>
-                </dd>
-                <dt>Größe</dt>
-                <dd>{{ exeInfo[root.path].size_bytes.toLocaleString() }} B</dd>
-                <dt>SHA-1</dt>
-                <dd class="hash">{{ exeInfo[root.path].sha1 }}</dd>
-                <dt>MD5</dt>
-                <dd class="hash">{{ exeInfo[root.path].md5 }}</dd>
-              </dl>
+      <template v-else-if="wowScanned">
+        <!-- Zustand 1: verankert — diese Installation wird verwaltet. -->
+        <div v-if="managed">
+          <p class="section-label ok">Verwaltet</p>
+          <RootCard :root="managed" :exe="exeInfo[managed.path]" />
+
+          <div v-if="suggestions.length" class="others">
+            <p class="section-label">Weitere erkannte Installationen (nicht verwaltet)</p>
+            <p class="hint">
+              Um eine andere zu verwalten, verschiebe den Manager dorthin.
+            </p>
+            <div v-for="s in suggestions" :key="s.path" class="suggestion">
+              <RootCard :root="s" :exe="exeInfo[s.path]" />
+              <button type="button" @click="relocateInto(s.path)">
+                Manager hierher verschieben
+              </button>
             </div>
-          </li>
-        </ul>
+          </div>
+        </div>
+
+        <!-- Zustand 2: nicht verankert, aber Installationen erkannt. -->
+        <div v-else-if="suggestions.length" class="unanchored">
+          <p class="message warn">
+            Tome of Addons liegt nicht in einem WoW-Ordner und verwaltet daher noch
+            keine Installation. Erkannt wurde:
+          </p>
+          <div v-for="s in suggestions" :key="s.path" class="suggestion">
+            <RootCard :root="s" :exe="exeInfo[s.path]" />
+            <button type="button" @click="relocateInto(s.path)">
+              Manager hierher verschieben
+            </button>
+          </div>
+        </div>
+
+        <!-- Zustand 3: nichts gefunden. -->
+        <p v-else class="message">
+          Keine WoW-1.12.1-Installation gefunden. Lege den Manager in deinen
+          WoW-Ordner und starte ihn dort.
+        </p>
+
+        <p v-if="relocateMsg" class="message">{{ relocateMsg }}</p>
       </template>
     </section>
 
@@ -200,103 +227,41 @@ async function restartNow() {
   text-align: left;
 }
 
-.roots {
-  list-style: none;
-  padding: 0;
-}
-
-.root {
-  padding: 0.75em 1em;
-  border: 1px solid #d0d0d0;
-  border-radius: 8px;
-  margin-bottom: 0.75em;
-}
-
-.root .path {
-  display: block;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85em;
-  word-break: break-all;
-}
-
-.root .method {
-  display: inline-block;
-  margin-top: 0.4em;
+.section-label {
   font-size: 0.75em;
-  color: #888;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.root .markers {
-  display: flex;
-  gap: 0.5em;
-  margin-top: 0.5em;
-  flex-wrap: wrap;
-}
-
-.root .markers span {
-  font-size: 0.75em;
-  padding: 0.15em 0.5em;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.06);
-  color: #999;
-}
-
-.root .markers span.ok {
-  background: rgba(39, 174, 96, 0.15);
-  color: #1e8449;
-}
-
-.exe {
-  margin-top: 0.75em;
-  padding-top: 0.6em;
-  border-top: 1px solid #e0e0e0;
-  font-size: 0.8em;
-}
-
-.exe .identity {
+  letter-spacing: 0.06em;
+  color: #888;
+  margin: 0 0 0.4em;
   font-weight: 600;
-  margin: 0 0 0.5em;
 }
 
-.exe .identity.official {
+.section-label.ok {
   color: #1e8449;
 }
 
-.exe .identity.modified,
-.exe .identity.unknown-build {
+.others {
+  margin-top: 1.5em;
+  padding-top: 1em;
+  border-top: 1px dashed #d0d0d0;
+}
+
+.hint {
+  font-size: 0.85em;
+  color: #888;
+  margin: 0 0 0.75em;
+}
+
+.suggestion {
+  margin-bottom: 1em;
+}
+
+.suggestion button {
+  font-size: 0.85em;
+}
+
+.warn {
   color: #b9770e;
-}
-
-.exe .identity.unknown {
-  color: #c0392b;
-}
-
-.exe dl {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.15em 0.75em;
-  margin: 0;
-}
-
-.exe dt {
-  color: #888;
-}
-
-.exe dd {
-  margin: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  word-break: break-all;
-}
-
-.exe dd.hash {
-  font-size: 0.92em;
-}
-
-.exe .dim {
-  color: #888;
-  font-family: inherit;
 }
 
 .message {
