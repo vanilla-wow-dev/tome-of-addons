@@ -27,7 +27,7 @@ Aktuell veröffentlicht: **v0.2.1**.
 | Qualitätsgate | ✅ `vue-tsc`, `clippy -D warnings`, `rustfmt`, 100-%-Coverage-Gate (Rust via `cargo-llvm-cov`, Frontend via Vitest) |
 | Lokalisierung | ✅ de / en / fr (`vue-i18n`) |
 | MVP-0 — WoW-Erkennung | ✅ `wow.rs` (Walk-up + Windows-Registry), `exe.rs` (Version/Build), `relocate.rs` (Manager in WoW-Ordner verschieben) |
-| MVP-0 — Addon-Scanner | ✅ Tree-Hash (`crates/tree-hash`), `.toc`-Parser (`crates/toc`), Scanner + Hash-Cache (`addons.rs`) — ⬜ nur noch die UI-Liste |
+| **MVP-0 — vollständig** | ✅ Tree-Hash (`crates/tree-hash`), `.toc`-Parser (`crates/toc`), Scanner + Hash-Cache (`addons.rs`), Addon-Liste (`AddonTable.vue`) |
 | MVP-1 und später | ⬜ |
 
 ---
@@ -862,8 +862,9 @@ per Default nicht teilen.
 | Backend-Sprache | Rust (stable) |
 | Frontend-Sprache | TypeScript |
 | Frontend-Framework | Vue 3 + Vite |
-| Styling | Tailwind |
-| Tabellen | TanStack Table (headless) + TanStack Virtual |
+| Styling | Tailwind v4 (CSS-first, `@tailwindcss/vite`) |
+| Tabellen | TanStack Table v8 (headless) |
+| Schriften | Cinzel (Display) + EB Garamond (Fließtext), lokal eingebettet, SIL OFL 1.1 |
 | Lokalisierung | vue-i18n (de / en / fr) |
 | Async-Runtime | tokio |
 | Hashing | `sha2` (SHA-256) + eigener Tree-Serializer |
@@ -907,13 +908,13 @@ Identitäts-Anker ist der teuerste denkbare Bug in diesem System.
 
 ## Phasen-Plan
 
-### MVP-0 — Lokale Discovery
+### MVP-0 — Lokale Discovery ✅
 - ✅ Tauri-Skeleton + Vue-Frontend.
 - ✅ WoW-Installations-Erkennung (Walk-up + Registry) und Relocate.
 - ✅ Scanner für `Interface/AddOns/`, Tree-Hash, Hash-Cache.
 - ✅ `.toc`-Parser.
 - ✅ Mode-Detection (`.git/` vs nicht).
-- ⬜ UI: Liste aller Addons mit Tree-Hash-Anzeige.
+- ✅ UI: Liste aller Addons mit Tree-Hash-Anzeige.
 
 ### MVP-1 — Direct-Git-Install
 - Install via beliebiger Git-URL (HTTPS + SSH).
@@ -994,6 +995,10 @@ Identitäts-Anker ist der teuerste denkbare Bug in diesem System.
 | E-13 | Der Fingerprint für den Cache-Key lebt in der Tree-Hash-Crate, nicht im Scanner | Er muss dieselben Ausschlussregeln anwenden wie der Hasher. Andernfalls würde die `.git/index`-mtime, die sich bei jedem `git status` ändert, den Cache jedes Developer-Mode-Addons dauerhaft invalidieren. Genau die Divergenz, gegen die E-8 argumentiert. |
 | E-14 | Der Cache wird pro Scan **neu aufgebaut** statt ergänzt, und speichert seinen Algorithmus mit | Neuaufbau lässt Einträge gelöschter Addons von selbst verschwinden. Der mitgespeicherte Algorithmus verhindert, dass nach einem Verfahrenswechsel alte Hashes stillschweigend weiterbenutzt werden — ein Cache mit fremdem Algorithmus wird verworfen, nicht gemischt. |
 | E-15 | Ein Addon, dessen Hash scheitert, bleibt sichtbar (mit Fehlertext) statt zu verschwinden | Ein Nutzer, der sein Addon nicht in der Liste findet, sucht den Fehler an der falschen Stelle. Nur der Cache-Eintrag entfällt, damit ein Fehlschlag nicht festgeschrieben wird. |
+| E-16 | Voll thematisches Design, aber Thema nur in der **Rahmung** | Kopfzeile, Rahmen, Abschnittsköpfe und Badges tragen den Tome-Charakter; Datenzellen bleiben monospace und kontraststark. Eine Liste mit 242 Zeilen ist der Zweck des Bildschirms — Lesbarkeit schlägt dort Atmosphäre. |
+| E-17 | Schriften lokal eingebettet statt über ein CDN | Ein Google-Fonts-Request bei jedem Start einer Desktop-App wäre ein Datenabfluss an einen Dritten. SIL OFL 1.1 erlaubt das Mitliefern ausdrücklich; Lizenztexte liegen bei den Dateien. Kosten: 70 KB im Binary, dafür offline-fähig. |
+| E-18 | Pergament prozedural (Verläufe + SVG-Rauschen), nicht als Bilddatei | Skaliert verlustfrei auf jeder Auflösung, lässt sich für den Dunkelmodus umfärben statt zu duplizieren, und bläht das Binary nicht auf. |
+| E-19 | TanStack Table **v8** statt des frisch erschienenen v9 | v9 stellt Reaktivität auf TanStack-Store-Atoms und `table.Subscribe` um und verlangt explizites Feature-Opt-in. Keines der neuen Features wird hier gebraucht, die Testbarkeit litte. Die Spaltendefinitionen sind weitgehend portierbar, ein Wechsel bleibt später möglich. |
 
 ---
 
@@ -1009,6 +1014,8 @@ Identitäts-Anker ist der teuerste denkbare Bug in diesem System.
 | Manager-Logging: lokal Datei oder in-app Log-Viewer? | beides, default Datei + UI-Tab |
 | Telemetry (anonymisiert): Crash-Reports? | nicht in MVP, später diskutieren |
 | Doku-Sprache: Repo-Doku ist Deutsch, UI ist de/en/fr | offen — für ein öffentliches Repo wäre EN als Doku-Quellsprache konsistenter |
+| Virtualisierung der Addon-Liste | offen — 242 Zeilen rendert der Webview problemlos; erst nötig, wenn Bestände in die Tausende gehen |
+| Visuelle Regressionstests (Screenshots) | offen — das Theme ist derzeit nur manuell geprüft; die Tests decken Verhalten ab, nicht Aussehen |
 
 ---
 
@@ -1043,8 +1050,10 @@ MVP-0 fertigstellen, in dieser Reihenfolge:
    Hash-Cache, `rayon`. 100 % Line- und Function-Coverage. Am realen Bestand:
    242 Addons, 17 übersprungene Ordner, 0 Fehler, **1,70 s kalt → 0,010 s warm
    (175×)**.
-4. **UI-Fundament** — Tailwind + TanStack Table einziehen, bestehende Views
-   (`App.vue`, `RootCard.vue`) migrieren. Eigener PR, damit die Migration nicht
-   mit dem Feature vermischt ist.
-5. **Addon-Liste** — Name, Version, Tree-Hash-Kurzform, Mode, Größe; sortier- und
-   filterbar.
+4. ~~**UI-Fundament** — Tailwind + TanStack Table.~~ ✅ Tailwind v4 (CSS-first),
+   TanStack Table v8, thematisches Design-System in `src/style.css`.
+5. ~~**Addon-Liste**~~ ✅ `AddonTable.vue`: sortierbar, durchsuchbar (inkl. Hash
+   und Pfad), Detail-Ausklappung, übersprungene Ordner mit Grund. 79
+   Frontend-Tests, Lines und Functions bei 100 %.
+
+Damit ist **MVP-0 abgeschlossen**. Als Nächstes MVP-1 (Direct-Git-Install).

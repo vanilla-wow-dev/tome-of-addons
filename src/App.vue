@@ -6,8 +6,10 @@ import { getVersion } from "@tauri-apps/api/app";
 import { check, Update } from "@tauri-apps/plugin-updater";
 import { relaunch, exit } from "@tauri-apps/plugin-process";
 import { type WowRoot, type WowExeInfo, type Detection, fmtBytes } from "./wow";
+import { type AddonScan } from "./addons";
 import { SUPPORTED_LOCALES, setLocale, type Locale } from "./i18n";
 import RootCard from "./RootCard.vue";
+import AddonTable from "./AddonTable.vue";
 
 const { t, locale } = useI18n();
 
@@ -21,6 +23,10 @@ const wowScanned = ref(false);
 const wowError = ref("");
 const exeInfo = ref<Record<string, WowExeInfo>>({});
 const relocateMsg = ref("");
+
+const addonScan = ref<AddonScan | null>(null);
+const addonError = ref("");
+const addonBusy = ref(false);
 
 async function detectWow() {
   wowError.value = "";
@@ -36,6 +42,9 @@ async function detectWow() {
       (r): r is WowRoot => r !== null,
     );
     await Promise.all(roots.map((r) => inspectExe(r.path)));
+    // Gescannt wird nur die verwaltete Installation — Vorschläge sind Ziele
+    // zum Hinverschieben, nicht verwaltete Bestände.
+    if (detection.managed) await scanAddons(detection.managed.path);
   } catch (err) {
     wowError.value = t("wow.searchFailed", { err: String(err) });
   }
@@ -49,6 +58,19 @@ async function inspectExe(root: string) {
   }
 }
 
+async function scanAddons(root: string) {
+  addonBusy.value = true;
+  addonError.value = "";
+  try {
+    addonScan.value = await invoke<AddonScan>("scan_addons_command", { root });
+  } catch (err) {
+    addonScan.value = null;
+    addonError.value = t("addons.scanFailed", { err: String(err) });
+  } finally {
+    addonBusy.value = false;
+  }
+}
+
 async function relocateInto(targetRoot: string) {
   relocateMsg.value = t("relocate.inProgress");
   try {
@@ -59,7 +81,6 @@ async function relocateInto(targetRoot: string) {
     relocateMsg.value = t("relocate.failed", { err: String(err) });
   }
 }
-
 
 type Status = "idle" | "available" | "downloading" | "ready" | "error";
 
@@ -129,62 +150,79 @@ async function restartNow() {
 </script>
 
 <template>
-  <main class="container">
-    <div class="topbar">
-      <label class="lang">
-        <span class="sr-only">{{ t("language") }}</span>
-        <select :value="locale" aria-label="language" @change="onLanguageChange">
-          <option v-for="l in SUPPORTED_LOCALES" :key="l" :value="l">{{ l.toUpperCase() }}</option>
-        </select>
-      </label>
-    </div>
+  <main class="relative z-[1] mx-auto max-w-5xl px-6 py-[5vh]">
+    <label class="absolute top-[5vh] right-6 text-sm">
+      <span class="sr-only">{{ t("language") }}</span>
+      <select
+        :value="locale"
+        aria-label="language"
+        class="tome-input text-xs"
+        @change="onLanguageChange"
+      >
+        <option v-for="l in SUPPORTED_LOCALES" :key="l" :value="l">{{ l.toUpperCase() }}</option>
+      </select>
+    </label>
 
-    <h1>Tome of Addons</h1>
-    <p class="tagline">{{ t("tagline") }}</p>
-    <p class="version">v{{ version || "…" }}</p>
+    <header class="text-center">
+      <h1 class="text-4xl text-gold-700 dark:text-gold-300">Tome of Addons</h1>
+      <p class="mt-1 italic opacity-70">{{ t("tagline") }}</p>
+      <p data-testid="version" class="tome-data mt-1 opacity-50">v{{ version || "…" }}</p>
+    </header>
 
-    <section class="wow">
-      <p v-if="wowError" class="message error">{{ wowError }}</p>
+    <section class="mx-auto mt-8 max-w-2xl text-left">
+      <p v-if="wowError" class="text-verdict-bad dark:text-verdict-bad-dark my-4">{{ wowError }}</p>
 
       <template v-else-if="wowScanned">
         <!-- Zustand 1: verankert — diese Installation wird verwaltet. -->
         <div v-if="managed">
-          <p class="section-label ok">{{ t("wow.managed") }}</p>
+          <p class="tome-heading mb-2">{{ t("wow.managed") }}</p>
           <RootCard :root="managed" :exe="exeInfo[managed.path]" />
 
-          <div v-if="suggestions.length" class="others">
-            <p class="section-label">{{ t("wow.others") }}</p>
-            <p class="hint">{{ t("wow.moveHint") }}</p>
-            <div v-for="s in suggestions" :key="s.path" class="suggestion">
+          <div v-if="suggestions.length" class="mt-6 border-t border-dashed border-gold-700/40 pt-4">
+            <p class="tome-heading mb-2">{{ t("wow.others") }}</p>
+            <p class="mb-3 text-sm opacity-60">{{ t("wow.moveHint") }}</p>
+            <div v-for="s in suggestions" :key="s.path" class="mb-4">
               <RootCard :root="s" :exe="exeInfo[s.path]" />
-              <button type="button" @click="relocateInto(s.path)">{{ t("wow.moveHere") }}</button>
+              <button type="button" class="tome-button" @click="relocateInto(s.path)">
+                {{ t("wow.moveHere") }}
+              </button>
             </div>
           </div>
         </div>
 
         <!-- Zustand 2: nicht verankert, aber Installationen erkannt. -->
-        <div v-else-if="suggestions.length" class="unanchored">
-          <p class="message warn">{{ t("wow.unanchored") }}</p>
-          <div v-for="s in suggestions" :key="s.path" class="suggestion">
+        <div v-else-if="suggestions.length">
+          <p class="text-verdict-warn dark:text-verdict-warn-dark my-4">{{ t("wow.unanchored") }}</p>
+          <div v-for="s in suggestions" :key="s.path" class="mb-4">
             <RootCard :root="s" :exe="exeInfo[s.path]" />
-            <button type="button" @click="relocateInto(s.path)">{{ t("wow.moveHere") }}</button>
+            <button type="button" class="tome-button" @click="relocateInto(s.path)">
+              {{ t("wow.moveHere") }}
+            </button>
           </div>
         </div>
 
         <!-- Zustand 3: nichts gefunden. -->
-        <p v-else class="message">{{ t("wow.none") }}</p>
+        <p v-else class="my-4">{{ t("wow.none") }}</p>
 
-        <p v-if="relocateMsg" class="message">{{ relocateMsg }}</p>
+        <p v-if="relocateMsg" class="my-4">{{ relocateMsg }}</p>
       </template>
     </section>
 
-    <p v-if="message" :class="['message', status]">{{ message }}</p>
+    <p v-if="addonBusy" class="mt-6 text-center opacity-70">{{ t("addons.scanning") }}</p>
+    <p v-else-if="addonError" class="text-verdict-bad dark:text-verdict-bad-dark mt-6 text-center">
+      {{ addonError }}
+    </p>
+    <AddonTable v-else-if="addonScan" :scan="addonScan" />
 
-    <div v-if="status === 'available'" class="banner">
-      <button type="button" @click="installUpdate">{{ t("update.download") }}</button>
+    <p v-if="message" class="my-4 text-center">{{ message }}</p>
+
+    <div v-if="status === 'available'" class="tome-panel mx-auto mt-6 max-w-md p-4 text-center">
+      <button type="button" class="tome-button" @click="installUpdate">
+        {{ t("update.download") }}
+      </button>
     </div>
 
-    <div v-if="status === 'downloading'" class="banner">
+    <div v-if="status === 'downloading'" class="tome-panel mx-auto mt-6 max-w-md p-4 text-center">
       <p>
         {{ t("update.downloading") }}
         {{ fmtBytes(progress.downloaded) }}
@@ -192,174 +230,10 @@ async function restartNow() {
       </p>
     </div>
 
-    <div v-if="status === 'ready'" class="banner ready">
-      <button type="button" @click="restartNow">{{ t("update.restart") }}</button>
+    <div v-if="status === 'ready'" class="tome-panel mx-auto mt-6 max-w-md p-4 text-center">
+      <button type="button" class="tome-button" @click="restartNow">
+        {{ t("update.restart") }}
+      </button>
     </div>
   </main>
 </template>
-
-<style scoped>
-.container {
-  max-width: 640px;
-  margin: 0 auto;
-  padding: 6vh 2em;
-  text-align: center;
-}
-
-.topbar {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.lang select {
-  font-size: 0.85em;
-  padding: 0.25em 0.5em;
-  border-radius: 6px;
-  border: 1px solid #c0c0c0;
-  background: #fff;
-  color: #1a1a1a;
-  cursor: pointer;
-}
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
-
-@media (prefers-color-scheme: dark) {
-  .lang select {
-    background: #2a2a2a;
-    color: #f0f0f0;
-    border-color: #444;
-  }
-}
-
-.tagline {
-  color: #888;
-  margin-top: -0.5em;
-  font-style: italic;
-}
-
-.version {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: #888;
-}
-
-.wow {
-  margin: 1.5em auto;
-  max-width: 560px;
-  text-align: left;
-}
-
-.section-label {
-  font-size: 0.75em;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #888;
-  margin: 0 0 0.4em;
-  font-weight: 600;
-}
-
-.section-label.ok {
-  color: #1e8449;
-}
-
-.others {
-  margin-top: 1.5em;
-  padding-top: 1em;
-  border-top: 1px dashed #d0d0d0;
-}
-
-.hint {
-  font-size: 0.85em;
-  color: #888;
-  margin: 0 0 0.75em;
-}
-
-.suggestion {
-  margin-bottom: 1em;
-}
-
-.suggestion button {
-  font-size: 0.85em;
-}
-
-.warn {
-  color: #b9770e;
-}
-
-.message {
-  margin: 1em 0;
-}
-
-.message.error {
-  color: #c0392b;
-}
-
-.banner {
-  margin: 1.5em auto;
-  padding: 1em;
-  border: 1px solid #d0d0d0;
-  border-radius: 8px;
-  max-width: 420px;
-}
-
-.banner.ready {
-  border-color: #27ae60;
-  background: rgba(39, 174, 96, 0.1);
-}
-</style>
-
-<style>
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 1.5;
-  color: #1a1a1a;
-  background-color: #f6f6f6;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f0f0f0;
-    background-color: #1f1f1f;
-  }
-  .banner {
-    border-color: #444;
-  }
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid #c0c0c0;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #ffffff;
-  color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.2s, background-color 0.2s;
-}
-
-button:hover:not(:disabled) {
-  border-color: #396cd8;
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-@media (prefers-color-scheme: dark) {
-  button {
-    background-color: #2a2a2a;
-    color: #f0f0f0;
-    border-color: #444;
-  }
-}
-</style>

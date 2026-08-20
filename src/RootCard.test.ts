@@ -33,7 +33,20 @@ beforeEach(() => setLocale("de"));
 
 describe("RootCard", () => {
   it("zeigt ohne exe keinen Detailblock", () => {
-    expect(mountCard({ root: ROOT }).find(".exe").exists()).toBe(false);
+    // Am Inhalt geprüft, nicht an einer CSS-Klasse: die überlebt keine
+    // Umgestaltung und der Test würde lautlos wirkungslos.
+    const w = mountCard({ root: ROOT });
+    expect(w.text()).toContain("/W");
+    expect(w.text()).not.toContain("SHA-1");
+    expect(w.text()).not.toContain("MD5");
+    expect(w.findAll("dl")).toHaveLength(0);
+  });
+
+  it("zeigt die Marker der Installation", () => {
+    const w = mountCard({ root: { ...ROOT, has_addons: false } });
+    expect(w.text()).toContain("WoW.exe");
+    expect(w.text()).toContain("MPQ");
+    expect(w.text()).toContain("AddOns");
   });
 
   it("identität: offiziell", () => {

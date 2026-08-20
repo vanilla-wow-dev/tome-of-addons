@@ -50,8 +50,40 @@ const EXE: WowExeInfo = {
   identity: { status: "official", version: "1.12.1", locale: "enUS" },
 };
 
+const SCAN = {
+  addons: [
+    {
+      id: "pfQuest",
+      path: "/games/WoW/Interface/AddOns/pfQuest",
+      title: "pfQuest",
+      version: "GIT",
+      interface: "11200",
+      notes: null,
+      author: "Shagu",
+      tree_sha: "7c1d90ffaa11" + "0".repeat(52),
+      tree_sha_short: "7c1d90ffaa11",
+      mode: "consumer" as const,
+      file_count: 2310,
+      size_bytes: 78_000_000,
+      cached: false,
+      error: null,
+    },
+  ],
+  skipped: [],
+  cache_hits: 0,
+  hashed: 1,
+};
+
 /** invoke-Mock, das per Command-Namen verzweigt. */
-function mockInvoke(detection: Detection, opts: { exeFails?: boolean; relocateFails?: boolean } = {}) {
+function mockInvoke(
+  detection: Detection,
+  opts: {
+    exeFails?: boolean;
+    relocateFails?: boolean;
+    scanFails?: boolean;
+    scan?: typeof SCAN;
+  } = {},
+) {
   invoke.mockImplementation((cmd: string) => {
     if (cmd === "detect_command") return Promise.resolve(detection);
     if (cmd === "inspect_wow_exe_command")
@@ -60,6 +92,10 @@ function mockInvoke(detection: Detection, opts: { exeFails?: boolean; relocateFa
       return opts.relocateFails
         ? Promise.reject(new Error("Plattenfehler"))
         : Promise.resolve("/other/WoW/tome-of-addons");
+    if (cmd === "scan_addons_command")
+      return opts.scanFails
+        ? Promise.reject(new Error("Kein Interface/AddOns"))
+        : Promise.resolve(opts.scan ?? null);
     return Promise.resolve(null);
   });
 }
@@ -82,7 +118,7 @@ describe("App – Mount & Version", () => {
     getVersion.mockResolvedValue("1.2.3");
     const wrapper = mount(App);
     await flushPromises();
-    expect(wrapper.find(".version").text()).toBe("v1.2.3");
+    expect(wrapper.find("[data-testid=version]").text()).toBe("v1.2.3");
   });
 
   it("löst die Erkennung beim Start aus", async () => {
@@ -121,7 +157,10 @@ describe("App – Verankert (managed)", () => {
     const wrapper = mount(App);
     await flushPromises();
     expect(wrapper.text()).toContain("/games/WoW");
-    expect(wrapper.find(".exe").exists()).toBe(false);
+    // Der Detailbereich bleibt leer — geprüft am Inhalt, nicht an einer
+    // CSS-Klasse, die eine Umgestaltung lautlos wegnehmen könnte.
+    expect(wrapper.text()).not.toContain("SHA-1");
+    expect(wrapper.text()).not.toContain("Offiziell");
   });
 });
 
@@ -301,5 +340,39 @@ describe("App – Update-Flow (automatischer Check)", () => {
     await buttonByText(wrapper, "herunterladen").trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("Download fehlgeschlagen");
+  });
+});
+
+describe("App – Addon-Scan", () => {
+  it("scannt nach erfolgreicher Erkennung und zeigt die Liste", async () => {
+    mockInvoke({ managed: ROOT, suggestions: [] }, { scan: SCAN });
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("scan_addons_command", { root: "/games/WoW" });
+    expect(wrapper.text()).toContain("pfQuest");
+    expect(wrapper.text()).toContain("7c1d90ffaa11");
+  });
+
+  it("scannt nicht, wenn keine Installation verwaltet wird", async () => {
+    // Vorschläge sind Ziele zum Hinverschieben, keine verwalteten Bestände.
+    mockInvoke({ managed: null, suggestions: [OTHER] });
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(invoke).not.toHaveBeenCalledWith("scan_addons_command", expect.anything());
+    // Auf ein Element der Tabelle prüfen, nicht auf "Addons" — das steht auch
+    // im Untertitel und im AddOns-Marker der Installation.
+    expect(wrapper.text()).not.toContain("Nur Developer-Mode");
+  });
+
+  it("meldet einen fehlgeschlagenen Scan, ohne die WoW-Erkennung zu verwerfen", async () => {
+    mockInvoke({ managed: ROOT, suggestions: [] }, { scanFails: true });
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Addon-Scan fehlgeschlagen");
+    // Die erkannte Installation bleibt sichtbar.
+    expect(wrapper.text()).toContain("/games/WoW");
   });
 });
