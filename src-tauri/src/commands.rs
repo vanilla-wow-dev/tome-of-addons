@@ -7,10 +7,13 @@
 //! ist dort zu 100 % getestet; hier bleibt nur triviale Delegation bzw. der nicht
 //! testbare Seiteneffekt (Datei kopieren, Prozess starten).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use tauri::Manager;
+
+use crate::addons::{scan, HashCache, Scan};
 use crate::exe::{inspect_wow_exe, WowExeInfo};
-use crate::wow::{detect, Detection};
+use crate::wow::{addons_dir, detect, Detection};
 
 /// Erkennt die zu verwaltende Installation (Walk-up) + Vorschläge (Registry).
 #[tauri::command]
@@ -35,6 +38,41 @@ pub fn relocate_into_command(target_root: String) -> Result<String, String> {
         .spawn()
         .map_err(|e| format!("Neustart fehlgeschlagen: {e}"))?;
     Ok(dest.to_string_lossy().into_owned())
+}
+
+/// Cache-Datei pro WoW-Root.
+///
+/// Der Pfad wird über den Root-Pfad geschlüsselt, damit mehrere Installationen
+/// sich nicht gegenseitig den Cache zerschießen. Die Datei liegt im
+/// App-Config-Verzeichnis statt neben dem Binary, weil das auch dann schreibbar
+/// ist, wenn WoW unter `C:\Program Files` liegt.
+fn cache_path(app: &tauri::AppHandle, root: &Path) -> Result<PathBuf, String> {
+    use sha1::{Digest, Sha1};
+    let base = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("Konfigurationsverzeichnis unbekannt: {e}"))?;
+    let key = hex::encode(Sha1::digest(root.to_string_lossy().as_bytes()));
+    Ok(base
+        .join("cache")
+        .join("tree-hashes")
+        .join(format!("{}.json", &key[..16])))
+}
+
+/// Scannt `Interface/AddOns/` des angegebenen WoW-Roots.
+#[tauri::command]
+pub fn scan_addons_command(app: tauri::AppHandle, root: String) -> Result<Scan, String> {
+    let root = Path::new(&root);
+    let dir =
+        addons_dir(root).ok_or_else(|| format!("Kein Interface/AddOns in {}", root.display()))?;
+
+    let path = cache_path(&app, root)?;
+    let mut cache = HashCache::load(&path);
+    let result = scan(&dir, &mut cache).map_err(|e| format!("Scan fehlgeschlagen: {e}"))?;
+    // Ein nicht schreibbarer Cache kostet nur Zeit beim nächsten Start und darf
+    // ein ansonsten erfolgreiches Ergebnis nicht verwerfen.
+    let _ = cache.save(&path);
+    Ok(result)
 }
 
 #[cfg(test)]

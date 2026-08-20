@@ -142,6 +142,9 @@ automatisch).
 tome-of-addons/                # Repo-Slug auf GitHub
 ├── docs/
 │   └── concept.md             # Architektur- und Konzept-Referenz
+├── crates/                    # Tauri-freie Kern-Crates, gemeinsam mit dem Collector
+│   ├── tree-hash/             # toa-tree-v1: kanonischer Identitäts-Hash
+│   └── toc/                   # .toc-Parser
 ├── src/                       # Vue-Frontend
 │   ├── App.vue                # Version, WoW-Erkennung, Update-Flow
 │   ├── RootCard.vue           # Darstellung einer WoW-Installation
@@ -150,6 +153,7 @@ tome-of-addons/                # Repo-Slug auf GitHub
 ├── src-tauri/
 │   ├── src/lib.rs             # Tauri-Builder, Plugins registriert
 │   ├── src/commands.rs        # IPC-Wrapper
+│   ├── src/addons.rs          # Scanner für Interface/AddOns + Hash-Cache
 │   ├── src/wow.rs             # WoW-Root-Erkennung (Walk-up + Registry)
 │   ├── src/exe.rs             # WoW.exe-Analyse (Version/Build)
 │   ├── src/relocate.rs        # Manager in WoW-Ordner verschieben
@@ -169,13 +173,14 @@ tome-of-addons/                # Repo-Slug auf GitHub
 
 MVP-0 fertigstellen:
 
-1. **`hash.rs`** — kanonischer Tree-Hash `toa-tree-v1` (SHA-256 über den
-   normalisierten Datei-Baum) als eigene Crate.
-2. **`toc.rs`** — `.toc`-Parser.
-3. **`addons.rs`** — Walk über `Interface/AddOns/`, Mode-Detection, Hash-Cache.
-4. **UI-Fundament** — Tailwind + TanStack Table einziehen, bestehende Views
+1. ✅ **`crates/tree-hash`** — kanonischer Tree-Hash `toa-tree-v1` (SHA-256 über
+   den normalisierten Datei-Baum).
+2. ✅ **`crates/toc`** — `.toc`-Parser.
+3. ✅ **`src-tauri/src/addons.rs`** — Walk über `Interface/AddOns/`,
+   Mode-Detection, Hash-Cache, `rayon`.
+4. ⬜ **UI-Fundament** — Tailwind + TanStack Table einziehen, bestehende Views
    migrieren.
-5. **Addon-Liste** — Name, Version, Tree-Hash, Mode, Größe.
+5. ⬜ **Addon-Liste** — Name, Version, Tree-Hash, Mode, Größe.
 
 Danach MVP-1 (Direct-Git-Install), MVP-2 (Index-Subscription), MVP-4 (Indexed
 Install). Vollbild und Begründungen in [`docs/concept.md`](docs/concept.md).

@@ -26,6 +26,9 @@ tauri-plugin-process = "2"
 sha1 = "0.10"
 md-5 = "0.10"
 hex = "0.4"
+rayon = "1"
+toa-tree-hash = { path = "../crates/tree-hash" }
+toa-toc = { path = "../crates/toc" }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

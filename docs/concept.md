@@ -27,7 +27,7 @@ Aktuell veröffentlicht: **v0.2.1**.
 | Qualitätsgate | ✅ `vue-tsc`, `clippy -D warnings`, `rustfmt`, 100-%-Coverage-Gate (Rust via `cargo-llvm-cov`, Frontend via Vitest) |
 | Lokalisierung | ✅ de / en / fr (`vue-i18n`) |
 | MVP-0 — WoW-Erkennung | ✅ `wow.rs` (Walk-up + Windows-Registry), `exe.rs` (Version/Build), `relocate.rs` (Manager in WoW-Ordner verschieben) |
-| MVP-0 — Addon-Scanner | ⬜ Tree-Hash, `.toc`-Parser, Hash-Cache, Addon-Liste |
+| MVP-0 — Addon-Scanner | ✅ Tree-Hash (`crates/tree-hash`), `.toc`-Parser (`crates/toc`), Scanner + Hash-Cache (`addons.rs`) — ⬜ nur noch die UI-Liste |
 | MVP-1 und später | ⬜ |
 
 ---
@@ -357,9 +357,9 @@ Das `asm`-Feature von `sha2` wurde gemessen und verworfen: auf x86_64 praktisch
 wirkungslos (3,72 s statt 3,62 s), würde aber eine C-Toolchain in jeden
 Cross-Build zwingen.
 
-Einordnung: 3,6 s einmalig auf dem schlechtestmöglichen Rechner, mit `rayon`
-über 8 Threads rund 1,2 s, und ab dem zweiten Start greift der Hash-Cache —
-dann bleibt der 41-ms-Walk plus Rehash der wenigen geänderten Ordner.
+Einordnung: 3,6 s einmalig auf dem schlechtestmöglichen Rechner. Der
+tatsächlich gemessene End-to-End-Scan über `addons.rs` liegt dank `rayon` bei
+**1,70 s kalt** und bei **0,010 s warm** — Faktor 175 durch den Hash-Cache.
 
 Implementierungsauflagen:
 - Parallelisierung über `rayon` — gehört in den Addon-Walk (`addons.rs`), nicht
@@ -910,10 +910,10 @@ Identitäts-Anker ist der teuerste denkbare Bug in diesem System.
 ### MVP-0 — Lokale Discovery
 - ✅ Tauri-Skeleton + Vue-Frontend.
 - ✅ WoW-Installations-Erkennung (Walk-up + Registry) und Relocate.
-- ⬜ Scanner für `Interface/AddOns/`, Tree-Hash, Hash-Cache.
-- ⬜ `.toc`-Parser.
+- ✅ Scanner für `Interface/AddOns/`, Tree-Hash, Hash-Cache.
+- ✅ `.toc`-Parser.
+- ✅ Mode-Detection (`.git/` vs nicht).
 - ⬜ UI: Liste aller Addons mit Tree-Hash-Anzeige.
-- ⬜ Mode-Detection (`.git/` vs nicht).
 
 ### MVP-1 — Direct-Git-Install
 - Install via beliebiger Git-URL (HTTPS + SSH).
@@ -991,6 +991,9 @@ Identitäts-Anker ist der teuerste denkbare Bug in diesem System.
 | E-10 | Die Git-Serialisierung wird gegen echtes `git write-tree` kreuzvalidiert, indem im Test SHA-256 gegen SHA-1 getauscht wird | Golden Vectors, die man aus der eigenen Implementierung gewinnt, beweisen nichts. Der Digest-generische Kern erlaubt einen echten externen Abgleich von Objektformat und Sortierregel. |
 | E-11 | Maßgeblich ist ausschließlich `<Ordnername>.toc` (case-insensitiv) | Neun Addons im Bestand liefern eine zweite Manifest-Datei (`pfQuest-tbc.toc`, `ShaguTweaks-tbc.toc`, `CallToArms-master.toc`). Der Client lädt nur die namensgleiche. Messbarer Beleg: über *alle* `.toc` gerechnet erscheinen Interface-Werte 20200/20400 (TBC), über die maßgeblichen nur 11000/11100/11200 — ohne die Regel würden Vanilla-Addons als TBC-Addons gelten. |
 | E-12 | `.toc`-Parsing schlägt nie fehl; Encoding wird lossy dekodiert | Ein `.toc` liefert reine Anzeige-Metadaten, der Identitäts-Anker ist der Tree-Hash. Ein kaputtes Byte in einem Notes-Feld darf ein Addon nicht unsichtbar machen. 1.12-Clients schrieben in der Locale-Kodierung, Latin-1/GBK ist also jederzeit möglich. |
+| E-13 | Der Fingerprint für den Cache-Key lebt in der Tree-Hash-Crate, nicht im Scanner | Er muss dieselben Ausschlussregeln anwenden wie der Hasher. Andernfalls würde die `.git/index`-mtime, die sich bei jedem `git status` ändert, den Cache jedes Developer-Mode-Addons dauerhaft invalidieren. Genau die Divergenz, gegen die E-8 argumentiert. |
+| E-14 | Der Cache wird pro Scan **neu aufgebaut** statt ergänzt, und speichert seinen Algorithmus mit | Neuaufbau lässt Einträge gelöschter Addons von selbst verschwinden. Der mitgespeicherte Algorithmus verhindert, dass nach einem Verfahrenswechsel alte Hashes stillschweigend weiterbenutzt werden — ein Cache mit fremdem Algorithmus wird verworfen, nicht gemischt. |
+| E-15 | Ein Addon, dessen Hash scheitert, bleibt sichtbar (mit Fehlertext) statt zu verschwinden | Ein Nutzer, der sein Addon nicht in der Liste findet, sucht den Fehler an der falschen Stelle. Nur der Cache-Eintrag entfällt, damit ein Fehlschlag nicht festgeschrieben wird. |
 
 ---
 
@@ -1035,8 +1038,11 @@ MVP-0 fertigstellen, in dieser Reihenfolge:
    24 Tests, 100 % Line- und Function-Coverage. Regeln aus einer Erhebung über
    266 reale `.toc`-Dateien abgeleitet (siehe E-11); verifiziert gegen alle 258
    Ordner ohne False Negatives.
-3. **`addons.rs`** — Walk über `Interface/AddOns/`, Mode-Detection, Hash-Cache,
-   `rayon`-Parallelisierung.
+3. ~~**`addons.rs`** — Walk über `Interface/AddOns/`.~~ ✅ Umgesetzt in
+   `src-tauri/src/addons.rs` samt `scan_addons_command`. Mode-Detection,
+   Hash-Cache, `rayon`. 100 % Line- und Function-Coverage. Am realen Bestand:
+   242 Addons, 17 übersprungene Ordner, 0 Fehler, **1,70 s kalt → 0,010 s warm
+   (175×)**.
 4. **UI-Fundament** — Tailwind + TanStack Table einziehen, bestehende Views
    (`App.vue`, `RootCard.vue`) migrieren. Eigener PR, damit die Migration nicht
    mit dem Feature vermischt ist.

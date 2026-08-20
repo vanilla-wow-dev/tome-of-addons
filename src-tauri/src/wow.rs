@@ -51,6 +51,15 @@ pub(crate) fn find_child(dir: &Path, name: &str) -> Option<PathBuf> {
     None
 }
 
+/// Case-insensitiver Pfad zu `Interface/AddOns` unterhalb eines WoW-Roots.
+///
+/// Legt nichts an: ein fehlender `AddOns`-Ordner ist bei frischer Installation
+/// ein legitimer Zustand und kein Fehler.
+pub(crate) fn addons_dir(root: &Path) -> Option<PathBuf> {
+    let interface = find_child(root, "interface").filter(|path| path.is_dir())?;
+    find_child(&interface, "addons").filter(|path| path.is_dir())
+}
+
 /// Prüft, ob `dir` (case-insensitiv) eine Datei namens `WoW.exe` enthält.
 fn has_wow_exe(dir: &Path) -> bool {
     find_child(dir, "wow.exe")
@@ -287,6 +296,48 @@ mod tests {
         fs::write(root.join("wow.exe"), b"stub").unwrap();
         fs::write(root.join("data").join("patch-3.mpq"), b"stub").unwrap();
         assert!(inspect_root(&root, "test").is_some());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn addons_dir_is_found_case_insensitively() {
+        let root = make_fake_root("addons-dir", true);
+        let found = addons_dir(&root).expect("AddOns sollte gefunden werden");
+        assert!(found.ends_with("AddOns"));
+        let _ = fs::remove_dir_all(&root);
+
+        // Wine/Linux-Schreibweise.
+        let lower = std::env::temp_dir().join(format!("toa-test-{}-addons-lc", std::process::id()));
+        let _ = fs::remove_dir_all(&lower);
+        fs::create_dir_all(lower.join("interface").join("addons")).unwrap();
+        assert!(addons_dir(&lower).is_some());
+        let _ = fs::remove_dir_all(&lower);
+    }
+
+    #[test]
+    fn addons_dir_is_absent_on_a_fresh_install() {
+        // Interface vorhanden, AddOns noch nicht — kein Fehler, nur None.
+        let root = make_fake_root("addons-dir-missing", false);
+        assert!(addons_dir(&root).is_none());
+        let _ = fs::remove_dir_all(&root);
+
+        // Gar kein Interface-Verzeichnis.
+        let bare = std::env::temp_dir().join(format!("toa-test-{}-nointf", std::process::id()));
+        let _ = fs::remove_dir_all(&bare);
+        fs::create_dir_all(&bare).unwrap();
+        assert!(addons_dir(&bare).is_none());
+
+        // "Interface" existiert, ist aber eine Datei.
+        fs::write(bare.join("Interface"), b"x").unwrap();
+        assert!(addons_dir(&bare).is_none());
+        let _ = fs::remove_dir_all(&bare);
+    }
+
+    #[test]
+    fn addons_dir_rejects_addons_as_a_file() {
+        let root = make_fake_root("addons-as-file", false);
+        fs::write(root.join("Interface").join("AddOns"), b"x").unwrap();
+        assert!(addons_dir(&root).is_none());
         let _ = fs::remove_dir_all(&root);
     }
 
