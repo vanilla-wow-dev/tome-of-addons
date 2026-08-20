@@ -7,11 +7,12 @@ Cross-platform Desktop-App für WoW 1.12.1 Addon-Management.
 - Repo: `vanilla-wow-dev/tome-of-addons`
 - Landing: `vanilla-wow.dev`
 - App-Identifier: `dev.vanilla-wow.tome-of-addons`
-- Konzept: `~/.data/sources/ulfgebhardt/concept/projects/wow-addon-manager.md`
-  (Working-Title aus der frühen Konzept-Phase — finaler Produkt-Name ist Tome of Addons.)
+- Konzept: [`docs/concept.md`](docs/concept.md) — Architektur, Identitäts-Modell,
+  Trust-Modell, Phasen-Plan, Entscheidungs-Log.
 
-Aktueller Stand: **MVP-3-Prototyp (Self-Update End-to-End)**. UI zeigt nur
-Version und Update-Banner. Addon-Logik ist noch nicht implementiert.
+Aktueller Stand: **v0.2.1**. Self-Update (MVP-3) läuft End-to-End, die
+WoW-Installations-Erkennung steht. Die Addon-Logik (Scanner, Tree-Hash,
+`.toc`-Parser) ist noch nicht implementiert.
 
 ## Stack
 
@@ -139,14 +140,24 @@ automatisch).
 
 ```
 tome-of-addons/                # Repo-Slug auf GitHub
+├── docs/
+│   └── concept.md             # Architektur- und Konzept-Referenz
 ├── src/                       # Vue-Frontend
-│   └── App.vue                # Minimal-UI: Version + Update-Flow
+│   ├── App.vue                # Version, WoW-Erkennung, Update-Flow
+│   ├── RootCard.vue           # Darstellung einer WoW-Installation
+│   ├── i18n.ts, locales/      # de / en / fr
+│   └── wow.ts                 # Typen + Formatierung
 ├── src-tauri/
 │   ├── src/lib.rs             # Tauri-Builder, Plugins registriert
+│   ├── src/commands.rs        # IPC-Wrapper
+│   ├── src/wow.rs             # WoW-Root-Erkennung (Walk-up + Registry)
+│   ├── src/exe.rs             # WoW.exe-Analyse (Version/Build)
+│   ├── src/relocate.rs        # Manager in WoW-Ordner verschieben
 │   ├── tauri.conf.json        # Updater-Endpoint + Pubkey
 │   ├── capabilities/default.json
 │   └── Cargo.toml
 ├── .github/workflows/
+│   ├── ci.yml                # typecheck, clippy, fmt, 100%-Coverage-Gates
 │   ├── release.yml           # release-please + tauri-action matrix build
 │   └── pr-title-lint.yml     # conventional commit enforcement
 ├── release-please-config.json
@@ -154,11 +165,17 @@ tome-of-addons/                # Repo-Slug auf GitHub
 └── package.json
 ```
 
-## Nächste MVPs (laut Konzept)
+## Nächste Schritte
 
-- **MVP-0**: Addon-Scanner (`Interface/AddOns/`-Walk, Tree-SHA, mtime-Cache)
-- **MVP-1**: Direct-Git-Install
-- **MVP-2**: Index-Subscription (Mojotrollz-Index)
-- **MVP-4**: Indexed Install + Consumer/Developer-Mode
+MVP-0 fertigstellen:
 
-Siehe Konzept-Dokument für Vollbild.
+1. **`hash.rs`** — kanonischer Tree-Hash `toa-tree-v1` (SHA-256 über den
+   normalisierten Datei-Baum) als eigene Crate.
+2. **`toc.rs`** — `.toc`-Parser.
+3. **`addons.rs`** — Walk über `Interface/AddOns/`, Mode-Detection, Hash-Cache.
+4. **UI-Fundament** — Tailwind + TanStack Table einziehen, bestehende Views
+   migrieren.
+5. **Addon-Liste** — Name, Version, Tree-Hash, Mode, Größe.
+
+Danach MVP-1 (Direct-Git-Install), MVP-2 (Index-Subscription), MVP-4 (Indexed
+Install). Vollbild und Begründungen in [`docs/concept.md`](docs/concept.md).
