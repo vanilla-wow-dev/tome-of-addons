@@ -28,6 +28,7 @@ coverage
 
 # Rust / Tauri build artifacts
 src-tauri/target/
+crates/*/target/
 
 # Signing keys — must never be committed
 *.key

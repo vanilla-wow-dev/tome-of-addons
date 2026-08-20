@@ -1,7 +1,9 @@
+mod addons;
 mod commands;
 mod exe;
 mod relocate;
 mod wow;
+mod wtf;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -12,7 +14,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::detect_command,
             commands::inspect_wow_exe_command,
-            commands::relocate_into_command
+            commands::relocate_into_command,
+            commands::scan_addons_command,
+            commands::list_characters_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

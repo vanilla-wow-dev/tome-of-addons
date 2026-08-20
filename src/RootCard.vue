@@ -25,130 +25,61 @@ const identityText = computed(() => {
       return t("exe.identity.unknown");
   }
 });
+
+/** Farbe des Verdikts — grün nur bei einer unveränderten Original-Exe. */
+const identityTone = computed(() => {
+  switch (props.exe?.identity.status) {
+    case "official":
+      return "text-verdict-ok dark:text-verdict-ok-dark";
+    case "unknown":
+      return "text-verdict-bad dark:text-verdict-bad-dark";
+    default:
+      return "text-verdict-warn dark:text-verdict-warn-dark";
+  }
+});
+
+const markers = computed(() => [
+  { label: "WoW.exe", ok: props.root.has_exe },
+  { label: "MPQ", ok: props.root.has_mpq },
+  { label: "Interface", ok: props.root.has_interface },
+  { label: "AddOns", ok: props.root.has_addons },
+]);
 </script>
 
 <template>
-  <div class="root">
-    <code class="path">{{ root.path }}</code>
-    <span class="method">{{ root.method }}</span>
-    <span class="markers">
-      <span :class="{ ok: root.has_exe }">WoW.exe</span>
-      <span :class="{ ok: root.has_mpq }">MPQ</span>
-      <span :class="{ ok: root.has_interface }">Interface</span>
-      <span :class="{ ok: root.has_addons }">AddOns</span>
+  <div class="tome-panel mb-3 px-4 py-3">
+    <code class="tome-data block break-all">{{ root.path }}</code>
+    <span class="font-display mt-1 inline-block text-[0.65rem] tracking-[0.15em] uppercase opacity-60">
+      {{ root.method }}
     </span>
 
-    <div v-if="exe" class="exe">
-      <p :class="['identity', exe.identity.status]">{{ identityText }}</p>
-      <dl>
-        <dt>{{ t("exe.build") }}</dt>
-        <dd>
+    <div class="mt-2 flex flex-wrap gap-2">
+      <span
+        v-for="marker in markers"
+        :key="marker.label"
+        :class="[
+          'tome-badge',
+          marker.ok ? 'text-verdict-ok dark:text-verdict-ok-dark' : 'opacity-40',
+        ]"
+        >{{ marker.label }}</span
+      >
+    </div>
+
+    <div v-if="exe" class="mt-3 border-t border-gold-700/30 pt-2 text-sm">
+      <p :class="['mb-2 font-semibold', identityTone]">{{ identityText }}</p>
+      <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+        <dt class="opacity-60">{{ t("exe.build") }}</dt>
+        <dd class="tome-data">
           {{ exe.build ?? "—" }}
-          <span v-if="exe.build_date" class="dim">({{ exe.build_date }})</span>
+          <span v-if="exe.build_date" class="opacity-60">({{ exe.build_date }})</span>
         </dd>
-        <dt>{{ t("exe.size") }}</dt>
-        <dd>{{ exe.size_bytes.toLocaleString() }} B</dd>
-        <dt>SHA-1</dt>
-        <dd class="hash">{{ exe.sha1 }}</dd>
-        <dt>MD5</dt>
-        <dd class="hash">{{ exe.md5 }}</dd>
+        <dt class="opacity-60">{{ t("exe.size") }}</dt>
+        <dd class="tome-data">{{ exe.size_bytes.toLocaleString() }} B</dd>
+        <dt class="opacity-60">SHA-1</dt>
+        <dd class="tome-data break-all">{{ exe.sha1 }}</dd>
+        <dt class="opacity-60">MD5</dt>
+        <dd class="tome-data break-all">{{ exe.md5 }}</dd>
       </dl>
     </div>
   </div>
 </template>
-
-<style scoped>
-.root {
-  padding: 0.75em 1em;
-  border: 1px solid #d0d0d0;
-  border-radius: 8px;
-  margin-bottom: 0.5em;
-}
-
-.path {
-  display: block;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85em;
-  word-break: break-all;
-}
-
-.method {
-  display: inline-block;
-  margin-top: 0.4em;
-  font-size: 0.75em;
-  color: #888;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.markers {
-  display: flex;
-  gap: 0.5em;
-  margin-top: 0.5em;
-  flex-wrap: wrap;
-}
-
-.markers span {
-  font-size: 0.75em;
-  padding: 0.15em 0.5em;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.06);
-  color: #999;
-}
-
-.markers span.ok {
-  background: rgba(39, 174, 96, 0.15);
-  color: #1e8449;
-}
-
-.exe {
-  margin-top: 0.75em;
-  padding-top: 0.6em;
-  border-top: 1px solid #e0e0e0;
-  font-size: 0.8em;
-}
-
-.exe .identity {
-  font-weight: 600;
-  margin: 0 0 0.5em;
-}
-
-.exe .identity.official {
-  color: #1e8449;
-}
-
-.exe .identity.modified,
-.exe .identity.unknown-build {
-  color: #b9770e;
-}
-
-.exe .identity.unknown {
-  color: #c0392b;
-}
-
-.exe dl {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.15em 0.75em;
-  margin: 0;
-}
-
-.exe dt {
-  color: #888;
-}
-
-.exe dd {
-  margin: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  word-break: break-all;
-}
-
-.exe dd.hash {
-  font-size: 0.92em;
-}
-
-.exe .dim {
-  color: #888;
-  font-family: inherit;
-}
-</style>

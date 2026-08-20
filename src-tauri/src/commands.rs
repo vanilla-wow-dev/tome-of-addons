@@ -7,10 +7,14 @@
 //! ist dort zu 100 % getestet; hier bleibt nur triviale Delegation bzw. der nicht
 //! testbare Seiteneffekt (Datei kopieren, Prozess starten).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use tauri::{Emitter, Manager};
+
+use crate::addons::{scan_with, HashCache, Scan};
 use crate::exe::{inspect_wow_exe, WowExeInfo};
-use crate::wow::{detect, Detection};
+use crate::wow::{addons_dir, detect, Detection};
+use crate::wtf::{list_characters, read_states, Character};
 
 /// Erkennt die zu verwaltende Installation (Walk-up) + Vorschläge (Registry).
 #[tauri::command]
@@ -35,6 +39,80 @@ pub fn relocate_into_command(target_root: String) -> Result<String, String> {
         .spawn()
         .map_err(|e| format!("Neustart fehlgeschlagen: {e}"))?;
     Ok(dest.to_string_lossy().into_owned())
+}
+
+/// Cache-Datei pro WoW-Root.
+///
+/// Der Pfad wird über den Root-Pfad geschlüsselt, damit mehrere Installationen
+/// sich nicht gegenseitig den Cache zerschießen. Die Datei liegt im
+/// App-Config-Verzeichnis statt neben dem Binary, weil das auch dann schreibbar
+/// ist, wenn WoW unter `C:\Program Files` liegt.
+fn cache_path(app: &tauri::AppHandle, root: &Path) -> Result<PathBuf, String> {
+    use sha1::{Digest, Sha1};
+    let base = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("Konfigurationsverzeichnis unbekannt: {e}"))?;
+    let key = hex::encode(Sha1::digest(root.to_string_lossy().as_bytes()));
+    Ok(base
+        .join("cache")
+        .join("tree-hashes")
+        .join(format!("{}.json", &key[..16])))
+}
+
+/// Listet alle Charaktere mit eigener Addon-Auswahl.
+#[tauri::command]
+pub fn list_characters_command(root: String) -> Vec<Character> {
+    list_characters(Path::new(&root))
+}
+
+/// Scannt `Interface/AddOns/` des angegebenen WoW-Roots.
+///
+/// `character` ist der Pfad zur `AddOns.txt` eines Charakters; fehlt er, bleibt
+/// der Aktiv-Zustand unbekannt. Der Fortschritt wird als `addon-scan-progress`
+/// gesendet, damit die Oberfläche beim ersten Scan nicht einfriert.
+#[tauri::command]
+pub fn scan_addons_command(
+    app: tauri::AppHandle,
+    root: String,
+    character: Option<String>,
+) -> Result<Scan, String> {
+    let root = Path::new(&root);
+    let dir =
+        addons_dir(root).ok_or_else(|| format!("Kein Interface/AddOns in {}", root.display()))?;
+
+    // Ein unlesbarer WTF-Ordner darf den Scan nicht verhindern — dann ist der
+    // Aktiv-Zustand eben unbekannt.
+    let states = character
+        .as_deref()
+        .map(Path::new)
+        .and_then(|path| read_states(path).ok())
+        .unwrap_or_default();
+
+    let path = cache_path(&app, root)?;
+    let mut cache = HashCache::load(&path);
+    let result = scan_with(&dir, &mut cache, &states, &|done, total, id| {
+        let _ = app.emit(
+            "addon-scan-progress",
+            ScanProgress {
+                done,
+                total,
+                current: id.to_string(),
+            },
+        );
+    })
+    .map_err(|e| format!("Scan fehlgeschlagen: {e}"))?;
+    // Ein nicht schreibbarer Cache kostet nur Zeit beim nächsten Start und darf
+    // ein ansonsten erfolgreiches Ergebnis nicht verwerfen.
+    let _ = cache.save(&path);
+    Ok(result)
+}
+
+#[derive(Clone, serde::Serialize)]
+struct ScanProgress {
+    done: usize,
+    total: usize,
+    current: String,
 }
 
 #[cfg(test)]

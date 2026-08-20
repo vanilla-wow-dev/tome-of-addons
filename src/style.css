@@ -1,0 +1,297 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Schriften — lokal eingebettet, keine Fremdrequests zur Laufzeit.
+   Beides Variable Fonts unter SIL OFL 1.1, Lizenztexte liegen daneben.
+   --------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: "Cinzel";
+  src: url("./assets/fonts/Cinzel.woff2") format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "EB Garamond";
+  src: url("./assets/fonts/EBGaramond.woff2") format("woff2");
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---------------------------------------------------------------------------
+   Design-Tokens.
+
+   Aufteilung mit Absicht: Das Thema trägt die *Rahmung* — Kopfzeile, Rahmen,
+   Abschnittsköpfe, Badges. Die *Datenflächen* bleiben ruhig und kontraststark,
+   weil dort 242 Zeilen gelesen werden müssen. Pergament wird prozedural erzeugt
+   (Verläufe + SVG-Rauschen), nicht als Bilddatei: skaliert verlustfrei, lässt
+   sich für den Dunkelmodus umfärben und bläht das Binary nicht auf.
+   --------------------------------------------------------------------------- */
+
+@theme {
+  --font-display: "Cinzel", "Palatino Linotype", "Book Antiqua", serif;
+  --font-body: "EB Garamond", Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  /* Pergament (hell) */
+  --color-parchment-50: #fbf6e9;
+  --color-parchment-100: #f4ead1;
+  --color-parchment-200: #e8d9b5;
+  --color-parchment-300: #d8c294;
+  --color-parchment-400: #c0a570;
+
+  /* Alterndes Leder (dunkel) */
+  --color-leather-700: #2b2118;
+  --color-leather-800: #1f1811;
+  --color-leather-900: #16110c;
+
+  /* Tinte */
+  --color-ink-500: #6b5a44;
+  --color-ink-700: #4a3c2c;
+  --color-ink-900: #2a2018;
+
+  /* Gold — Akzent für Rahmen, Kapitälchen, Zierrat */
+  --color-gold-300: #e3c77e;
+  --color-gold-500: #b8912f;
+  --color-gold-700: #8a6a1f;
+
+  /* Status. Bewusst gedämpft, damit sie sich ins Pergament fügen, aber gegen
+     ihren Hintergrund noch WCAG-AA-tauglichen Kontrast behalten. */
+  --color-verdict-ok: #2f6b3a;
+  --color-verdict-warn: #96601b;
+  --color-verdict-bad: #9c2f28;
+  --color-verdict-ok-dark: #7fc48c;
+  --color-verdict-warn-dark: #e0ab5e;
+  --color-verdict-bad-dark: #e58a80;
+}
+
+/* ---------------------------------------------------------------------------
+   Grundflächen
+   --------------------------------------------------------------------------- */
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+
+    /* Pergament: warmer Grundton, unregelmäßige Lichtflecken, feines Korn.
+       Das Rauschen kommt aus einem SVG-Filter als Data-URI — kein Asset. */
+    --surface: radial-gradient(
+        ellipse 80% 60% at 20% 0%,
+        rgba(255, 252, 240, 0.9),
+        transparent 60%
+      ),
+      radial-gradient(ellipse 70% 50% at 90% 100%, rgba(192, 165, 112, 0.35), transparent 65%),
+      linear-gradient(160deg, var(--color-parchment-100), var(--color-parchment-200));
+    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.35'/%3E%3C/svg%3E");
+    --grain-strength: 0.06;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface: radial-gradient(
+          ellipse 80% 60% at 20% 0%,
+          rgba(90, 70, 45, 0.55),
+          transparent 60%
+        ),
+        radial-gradient(ellipse 70% 50% at 90% 100%, rgba(0, 0, 0, 0.5), transparent 65%),
+        linear-gradient(160deg, var(--color-leather-700), var(--color-leather-900));
+      --grain-strength: 0.09;
+    }
+  }
+
+  html {
+    background: var(--color-parchment-200);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    html {
+      background: var(--color-leather-900);
+    }
+  }
+
+  body {
+    position: relative;
+    min-height: 100vh;
+    margin: 0;
+    background: var(--surface);
+    background-attachment: fixed;
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.55;
+    color: var(--color-ink-900);
+  }
+
+  /* Korn als eigene Ebene, damit es Text nicht beeinflusst. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: var(--grain);
+    opacity: var(--grain-strength);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    body {
+      color: var(--color-parchment-100);
+    }
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    margin: 0;
+  }
+
+  /* Reduzierte Bewegung respektieren — betrifft die Ausklapp-Animation. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Thematische Bausteine
+   --------------------------------------------------------------------------- */
+
+@utility tome-panel {
+  position: relative;
+  z-index: 1;
+  border: 1px solid var(--color-gold-700);
+  outline: 1px solid color-mix(in srgb, var(--color-gold-500) 35%, transparent);
+  outline-offset: 3px;
+  background: color-mix(in srgb, var(--color-parchment-50) 82%, transparent);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, white 55%, transparent) inset,
+    0 8px 28px -14px rgba(0, 0, 0, 0.55);
+  border-radius: 2px;
+
+  @media (prefers-color-scheme: dark) {
+    background: color-mix(in srgb, var(--color-leather-800) 88%, transparent);
+    border-color: var(--color-gold-700);
+  }
+}
+
+/* Kapitälchen-Überschrift mit flankierenden Zierlinien. */
+@utility tome-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-gold-700);
+
+  &::before,
+  &::after {
+    content: "";
+    height: 1px;
+    flex: 1;
+    background: linear-gradient(
+      to right,
+      transparent,
+      color-mix(in srgb, var(--color-gold-500) 60%, transparent),
+      transparent
+    );
+  }
+
+  @media (prefers-color-scheme: dark) {
+    color: var(--color-gold-300);
+  }
+}
+
+/* Datenflächen: ruhig, monospace, hoher Kontrast. Hier hört das Thema auf. */
+@utility tome-data {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+@utility tome-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.1em 0.5em;
+  border-radius: 2px;
+  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+@utility tome-input {
+  border: 1px solid var(--color-parchment-400);
+  background: color-mix(in srgb, var(--color-parchment-50) 70%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0.35em 0.6em;
+  font-family: var(--font-body);
+
+  &:focus-visible {
+    outline: 2px solid var(--color-gold-500);
+    outline-offset: 1px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    border-color: var(--color-ink-500);
+    background: color-mix(in srgb, black 25%, transparent);
+  }
+}
+
+@utility tome-button {
+  border: 1px solid var(--color-gold-700);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--color-parchment-50) 90%, transparent),
+    color-mix(in srgb, var(--color-parchment-200) 90%, transparent)
+  );
+  color: var(--color-ink-900);
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.45em 1.1em;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+
+  &:hover:not(:disabled) {
+    filter: brightness(1.06);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-gold-500);
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    background: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--color-leather-700) 92%, transparent),
+      color-mix(in srgb, var(--color-leather-900) 92%, transparent)
+    );
+    color: var(--color-parchment-100);
+  }
+}

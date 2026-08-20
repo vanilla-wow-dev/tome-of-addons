@@ -24,6 +24,11 @@ export interface WowExeInfo {
   sha1: string;
   md5: string;
   identity: ExeIdentity;
+  /**
+   * Interface-Version des Clients (z. B. "11200"), sofern der Build bekannt ist.
+   * Bezugswert für die Veraltet-Erkennung von Addons.
+   */
+  interface_version: string | null;
 }
 
 /**

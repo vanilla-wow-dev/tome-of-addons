@@ -7,15 +7,18 @@ Cross-platform Desktop-App für WoW 1.12.1 Addon-Management.
 - Repo: `vanilla-wow-dev/tome-of-addons`
 - Landing: `vanilla-wow.dev`
 - App-Identifier: `dev.vanilla-wow.tome-of-addons`
-- Konzept: `~/.data/sources/ulfgebhardt/concept/projects/wow-addon-manager.md`
-  (Working-Title aus der frühen Konzept-Phase — finaler Produkt-Name ist Tome of Addons.)
+- Konzept: [`docs/concept.md`](docs/concept.md) — Architektur, Identitäts-Modell,
+  Trust-Modell, Phasen-Plan, Entscheidungs-Log.
 
-Aktueller Stand: **MVP-3-Prototyp (Self-Update End-to-End)**. UI zeigt nur
-Version und Update-Banner. Addon-Logik ist noch nicht implementiert.
+Aktueller Stand: **MVP-0 abgeschlossen** (Release v0.2.1). Die App erkennt die
+WoW-Installation, scannt `Interface/AddOns/`, berechnet für jedes Addon den
+kanonischen Tree-Hash und zeigt alles in einer sortier- und durchsuchbaren
+Liste. Self-Update (MVP-3) läuft End-to-End.
 
 ## Stack
 
 - Tauri v2 (Rust-Backend, Vue 3 + Vite + TypeScript frontend)
+- Tailwind v4 + TanStack Table v8; Schriften lokal eingebettet (SIL OFL 1.1)
 - `tauri-plugin-updater` (Ed25519-signiert)
 - `tauri-plugin-process` (Restart-after-Update)
 - CI: GitHub Actions + `tauri-action` (Cross-Build für macOS/Linux/Windows)
@@ -139,14 +142,32 @@ automatisch).
 
 ```
 tome-of-addons/                # Repo-Slug auf GitHub
+├── docs/
+│   └── concept.md             # Architektur- und Konzept-Referenz
+├── crates/                    # Tauri-freie Kern-Crates, gemeinsam mit dem Collector
+│   ├── tree-hash/             # toa-tree-v1: kanonischer Identitäts-Hash
+│   └── toc/                   # .toc-Parser
 ├── src/                       # Vue-Frontend
-│   └── App.vue                # Minimal-UI: Version + Update-Flow
+│   ├── style.css              # Tailwind-Theme: Tokens, Pergament, Rahmen
+│   ├── assets/fonts/          # Cinzel + EB Garamond (SIL OFL 1.1, lokal)
+│   ├── AddonTable.vue         # Addon-Liste: Sortierung, Suche, Details
+│   ├── addons.ts              # Typen + reine Helfer zum Scan
+│   ├── App.vue                # Version, WoW-Erkennung, Update-Flow
+│   ├── RootCard.vue           # Darstellung einer WoW-Installation
+│   ├── i18n.ts, locales/      # de / en / fr
+│   └── wow.ts                 # Typen + Formatierung
 ├── src-tauri/
 │   ├── src/lib.rs             # Tauri-Builder, Plugins registriert
+│   ├── src/commands.rs        # IPC-Wrapper
+│   ├── src/addons.rs          # Scanner für Interface/AddOns + Hash-Cache
+│   ├── src/wow.rs             # WoW-Root-Erkennung (Walk-up + Registry)
+│   ├── src/exe.rs             # WoW.exe-Analyse (Version/Build)
+│   ├── src/relocate.rs        # Manager in WoW-Ordner verschieben
 │   ├── tauri.conf.json        # Updater-Endpoint + Pubkey
 │   ├── capabilities/default.json
 │   └── Cargo.toml
 ├── .github/workflows/
+│   ├── ci.yml                # typecheck, clippy, fmt, 100%-Coverage-Gates
 │   ├── release.yml           # release-please + tauri-action matrix build
 │   └── pr-title-lint.yml     # conventional commit enforcement
 ├── release-please-config.json
@@ -154,11 +175,20 @@ tome-of-addons/                # Repo-Slug auf GitHub
 └── package.json
 ```
 
-## Nächste MVPs (laut Konzept)
+## Nächste Schritte
 
-- **MVP-0**: Addon-Scanner (`Interface/AddOns/`-Walk, Tree-SHA, mtime-Cache)
-- **MVP-1**: Direct-Git-Install
-- **MVP-2**: Index-Subscription (Mojotrollz-Index)
-- **MVP-4**: Indexed Install + Consumer/Developer-Mode
+MVP-0 (abgeschlossen):
 
-Siehe Konzept-Dokument für Vollbild.
+1. ✅ **`crates/tree-hash`** — kanonischer Tree-Hash `toa-tree-v1` (SHA-256 über
+   den normalisierten Datei-Baum).
+2. ✅ **`crates/toc`** — `.toc`-Parser.
+3. ✅ **`src-tauri/src/addons.rs`** — Walk über `Interface/AddOns/`,
+   Mode-Detection, Hash-Cache, `rayon`.
+4. ✅ **UI-Fundament** — Tailwind v4 + TanStack Table v8, thematisches
+   Design-System in `src/style.css`.
+5. ✅ **Addon-Liste** — `AddonTable.vue` mit Sortierung, Suche und
+   Detail-Ausklappung.
+
+Als Nächstes: MVP-1 (Direct-Git-Install), MVP-2 (Index-Subscription), MVP-4
+(Indexed Install). Vollbild und Begründungen in
+[`docs/concept.md`](docs/concept.md).

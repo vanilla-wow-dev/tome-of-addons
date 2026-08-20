@@ -7,15 +7,21 @@ import { i18n, setLocale } from "./i18n";
 config.global.plugins = [i18n];
 
 // Tauri-APIs mocken. vi.hoisted, damit die Mock-Fns vor den vi.mock-Factories existieren.
-const { invoke, getVersion, check, relaunch, exit } = vi.hoisted(() => ({
-  invoke: vi.fn(),
-  getVersion: vi.fn(),
-  check: vi.fn(),
-  relaunch: vi.fn(),
-  exit: vi.fn(),
-}));
+const { invoke, getVersion, check, relaunch, exit, listen, unlisten } = vi.hoisted(() => {
+  const unlisten = vi.fn();
+  return {
+    invoke: vi.fn(),
+    getVersion: vi.fn(),
+    check: vi.fn(),
+    relaunch: vi.fn(),
+    exit: vi.fn(),
+    listen: vi.fn(),
+    unlisten,
+  };
+});
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+vi.mock("@tauri-apps/api/event", () => ({ listen }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion }));
 vi.mock("@tauri-apps/plugin-updater", () => ({ check, Update: class {} }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch, exit }));
@@ -48,10 +54,52 @@ const EXE: WowExeInfo = {
   sha1: "893def24f703fd18c1514d31b92f00e616d8375f",
   md5: "ccf83146dbb3d10ef826aa4de178a5be",
   identity: { status: "official", version: "1.12.1", locale: "enUS" },
+  interface_version: "11200",
+};
+
+const SCAN = {
+  addons: [
+    {
+      id: "pfQuest",
+      path: "/games/WoW/Interface/AddOns/pfQuest",
+      title: "pfQuest",
+      version: "GIT",
+      interface: "11200",
+      notes: null,
+      author: "Shagu",
+      tree_sha: "7c1d90ffaa11" + "0".repeat(52),
+      tree_sha_short: "7c1d90ffaa11",
+      mode: "consumer" as const,
+      default_state: "disabled",
+      enabled: null,
+      file_count: 2310,
+      size_bytes: 78_000_000,
+      cached: false,
+      error: null,
+    },
+  ],
+  skipped: [],
+  cache_hits: 0,
+  hashed: 1,
 };
 
 /** invoke-Mock, das per Command-Namen verzweigt. */
-function mockInvoke(detection: Detection, opts: { exeFails?: boolean; relocateFails?: boolean } = {}) {
+function mockInvoke(
+  detection: Detection,
+  opts: {
+    exeFails?: boolean;
+    relocateFails?: boolean;
+    scanFails?: boolean;
+    scan?: typeof SCAN;
+    characters?: Array<{
+      account: string;
+      realm: string;
+      name: string;
+      path: string;
+      label: string;
+    }>;
+  } = {},
+) {
   invoke.mockImplementation((cmd: string) => {
     if (cmd === "detect_command") return Promise.resolve(detection);
     if (cmd === "inspect_wow_exe_command")
@@ -60,6 +108,11 @@ function mockInvoke(detection: Detection, opts: { exeFails?: boolean; relocateFa
       return opts.relocateFails
         ? Promise.reject(new Error("Plattenfehler"))
         : Promise.resolve("/other/WoW/tome-of-addons");
+    if (cmd === "list_characters_command") return Promise.resolve(opts.characters ?? []);
+    if (cmd === "scan_addons_command")
+      return opts.scanFails
+        ? Promise.reject(new Error("Kein Interface/AddOns"))
+        : Promise.resolve(opts.scan ?? null);
     return Promise.resolve(null);
   });
 }
@@ -74,6 +127,7 @@ beforeEach(() => {
   getVersion.mockResolvedValue("0.1.0");
   check.mockResolvedValue(null);
   exit.mockResolvedValue(undefined);
+  listen.mockResolvedValue(unlisten);
   mockInvoke({ managed: null, suggestions: [] });
 });
 
@@ -82,7 +136,7 @@ describe("App – Mount & Version", () => {
     getVersion.mockResolvedValue("1.2.3");
     const wrapper = mount(App);
     await flushPromises();
-    expect(wrapper.find(".version").text()).toBe("v1.2.3");
+    expect(wrapper.find("[data-testid=version]").text()).toBe("v1.2.3");
   });
 
   it("löst die Erkennung beim Start aus", async () => {
@@ -121,7 +175,10 @@ describe("App – Verankert (managed)", () => {
     const wrapper = mount(App);
     await flushPromises();
     expect(wrapper.text()).toContain("/games/WoW");
-    expect(wrapper.find(".exe").exists()).toBe(false);
+    // Der Detailbereich bleibt leer — geprüft am Inhalt, nicht an einer
+    // CSS-Klasse, die eine Umgestaltung lautlos wegnehmen könnte.
+    expect(wrapper.text()).not.toContain("SHA-1");
+    expect(wrapper.text()).not.toContain("Offiziell");
   });
 });
 
@@ -301,5 +358,140 @@ describe("App – Update-Flow (automatischer Check)", () => {
     await buttonByText(wrapper, "herunterladen").trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("Download fehlgeschlagen");
+  });
+});
+
+describe("App – Charaktere und Fortschritt", () => {
+  const CHARACTER = {
+    account: "RYLON8",
+    realm: "NostalGeek 1.12",
+    name: "Zinnober",
+    path: "/wtf/Zinnober/AddOns.txt",
+    label: "Zinnober · NostalGeek 1.12 (RYLON8)",
+  };
+
+  it("lädt die Charakterliste und reicht die Auswahl an den Scan weiter", async () => {
+    mockInvoke({ managed: ROOT, suggestions: [] }, { scan: SCAN, characters: [CHARACTER] });
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("list_characters_command", { root: "/games/WoW" });
+    const select = wrapper.findAll("select").find((s) => s.text().includes("Zinnober"))!;
+    await select.setValue("/wtf/Zinnober/AddOns.txt");
+    await flushPromises();
+
+    // Neu gescannt wird mit Charakter — die Hashes kommen dabei aus dem Cache.
+    expect(invoke).toHaveBeenCalledWith("scan_addons_command", {
+      root: "/games/WoW",
+      character: "/wtf/Zinnober/AddOns.txt",
+    });
+  });
+
+  it("kommt ohne Charakterliste aus", async () => {
+    // Frische Installation ohne WTF-Ordner, oder Fehler beim Lesen.
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === "detect_command")
+        return Promise.resolve({ managed: ROOT, suggestions: [] });
+      if (cmd === "inspect_wow_exe_command") return Promise.resolve(EXE);
+      if (cmd === "list_characters_command") return Promise.reject(new Error("kein WTF"));
+      if (cmd === "scan_addons_command") return Promise.resolve(SCAN);
+      return Promise.resolve(null);
+    });
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.text()).toContain("pfQuest");
+    expect(wrapper.findAll("select").filter((s) => s.text().includes("Zinnober"))).toHaveLength(0);
+  });
+
+  it("zeigt den Scan-Fortschritt und blendet ihn danach aus", async () => {
+    let emit: ((event: { payload: unknown }) => void) | undefined;
+    listen.mockImplementation((_name: string, handler: (e: { payload: unknown }) => void) => {
+      emit = handler;
+      return Promise.resolve(unlisten);
+    });
+    let resolveScan: ((value: unknown) => void) | undefined;
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === "detect_command")
+        return Promise.resolve({ managed: ROOT, suggestions: [] });
+      if (cmd === "inspect_wow_exe_command") return Promise.resolve(EXE);
+      if (cmd === "list_characters_command") return Promise.resolve([]);
+      if (cmd === "scan_addons_command") return new Promise((r) => (resolveScan = r));
+      return Promise.resolve(null);
+    });
+
+    const wrapper = mount(App);
+    await flushPromises();
+
+    emit!({ payload: { done: 42, total: 242, current: "pfQuest" } });
+    await flushPromises();
+    expect(wrapper.text()).toContain("42 von 242");
+    expect(wrapper.text()).toContain("pfQuest");
+    expect(wrapper.find("[role=progressbar]").attributes("aria-valuenow")).toBe("42");
+
+    resolveScan!(SCAN);
+    await flushPromises();
+    expect(wrapper.find("[role=progressbar]").exists()).toBe(false);
+  });
+
+  it("scannt auch dann, wenn der Fortschritts-Listener scheitert", async () => {
+    // Der Balken bleibt dann unbestimmt — der Scan darf trotzdem nicht ausfallen.
+    listen.mockRejectedValue(new Error("kein Event-System"));
+    mockInvoke({ managed: ROOT, suggestions: [] }, { scan: SCAN });
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.text()).toContain("pfQuest");
+  });
+
+  it("meldet den Listener beim Zerstören wieder ab", async () => {
+    mockInvoke({ managed: ROOT, suggestions: [] }, { scan: SCAN });
+    const wrapper = mount(App);
+    await flushPromises();
+    wrapper.unmount();
+    expect(unlisten).toHaveBeenCalled();
+  });
+
+  it("zeigt einen Hinweis, solange die Installation gesucht wird", async () => {
+    // Ohne ihn wirkte die App beim Start eingefroren.
+    invoke.mockImplementation(() => new Promise(() => {}));
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.text()).toContain("Suche WoW-Installation");
+  });
+});
+
+describe("App – Addon-Scan", () => {
+  it("scannt nach erfolgreicher Erkennung und zeigt die Liste", async () => {
+    mockInvoke({ managed: ROOT, suggestions: [] }, { scan: SCAN });
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("scan_addons_command", {
+      root: "/games/WoW",
+      character: null,
+    });
+    expect(wrapper.text()).toContain("pfQuest");
+    expect(wrapper.text()).toContain("7c1d90ffaa11");
+  });
+
+  it("scannt nicht, wenn keine Installation verwaltet wird", async () => {
+    // Vorschläge sind Ziele zum Hinverschieben, keine verwalteten Bestände.
+    mockInvoke({ managed: null, suggestions: [OTHER] });
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(invoke).not.toHaveBeenCalledWith("scan_addons_command", expect.anything());
+    // Auf ein Element der Tabelle prüfen, nicht auf "Addons" — das steht auch
+    // im Untertitel und im AddOns-Marker der Installation.
+    expect(wrapper.text()).not.toContain("Nur Developer-Mode");
+  });
+
+  it("meldet einen fehlgeschlagenen Scan, ohne die WoW-Erkennung zu verwerfen", async () => {
+    mockInvoke({ managed: ROOT, suggestions: [] }, { scanFails: true });
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Addon-Scan fehlgeschlagen");
+    // Die erkannte Installation bleibt sichtbar.
+    expect(wrapper.text()).toContain("/games/WoW");
   });
 });
