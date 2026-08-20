@@ -379,6 +379,16 @@ Implementierungsauflagen:
 
 Beobachtbare Konstellationen pro Addon werden vom Manager so klassifiziert:
 
+### Client-Bezug: Interface-Version
+
+WoW lädt ein Addon nur, wenn dessen `## Interface` zur Interface-Version des
+Clients passt — sonst erst nach Aktivieren von „Veraltete AddOns laden". Der
+Manager gleicht deshalb beides ab und markiert Abweichungen.
+
+Im vermessenen Bestand betrifft das **11 von 242 Addons** (4× `11100`,
+7× `11000` gegen `11200`). Ohne diese Anzeige sucht der Nutzer den Fehler beim
+Addon statt bei der Interface-Version.
+
 | Lokal vs Index | Reaktion |
 | --- | --- |
 | Selber Tree-Hash bekannt im Index, Status `recommended` | OK, kein Update nötig. |
@@ -998,6 +1008,10 @@ Identitäts-Anker ist der teuerste denkbare Bug in diesem System.
 | E-16 | Voll thematisches Design, aber Thema nur in der **Rahmung** | Kopfzeile, Rahmen, Abschnittsköpfe und Badges tragen den Tome-Charakter; Datenzellen bleiben monospace und kontraststark. Eine Liste mit 242 Zeilen ist der Zweck des Bildschirms — Lesbarkeit schlägt dort Atmosphäre. |
 | E-17 | Schriften lokal eingebettet statt über ein CDN | Ein Google-Fonts-Request bei jedem Start einer Desktop-App wäre ein Datenabfluss an einen Dritten. SIL OFL 1.1 erlaubt das Mitliefern ausdrücklich; Lizenztexte liegen bei den Dateien. Kosten: 70 KB im Binary, dafür offline-fähig. |
 | E-18 | Pergament prozedural (Verläufe + SVG-Rauschen), nicht als Bilddatei | Skaliert verlustfrei auf jeder Auflösung, lässt sich für den Dunkelmodus umfärben statt zu duplizieren, und bläht das Binary nicht auf. |
+| E-20 | Die Modus-Spalte benennt nur „Git" und lässt sonst leer | Wir beobachten allein, ob ein `.git/` vorhanden ist. Ob die übrigen Dateien aus einem ZIP, von Hand oder von einem anderen Manager stammen, ist unbekannt — „ZIP" wäre eine Erfindung. Nebeneffekt: 241 von 242 Zeilen bleiben ruhig, die Ausnahme springt ins Auge. |
+| E-21 | Der Aktiv-Zustand kommt aus `WTF/…/AddOns.txt`, nicht aus `## DefaultState` | `DefaultState` ist nur der Anfangswert beim ersten Sehen. Messung am realen Bestand: 249 von 259 `.toc` sagen `disabled`, während der Charakter `Zinnober` 34 von 35 Addons aktiv hat. `DefaultState` bleibt im Detailbereich sichtbar, beantwortet die Frage aber nicht. |
+| E-22 | „Nie gesehen" ist ein dritter Zustand neben aktiv und aus | Ein Addon, das in `AddOns.txt` fehlt, ist dem Client nie begegnet — das ist etwas anderes als abgeschaltet. Beim Sortieren liegt es zwischen beiden, statt mit einem zu verschmelzen. |
+| E-23 | Die Interface-Version wird an der Build-Nummer festgemacht, nicht am Hash | Ein gepatchter Client (vanilla-tweaks, Widescreen-Fix) bleibt derselbe Client und lädt dieselben Addons. Die Zuordnung steht in `KNOWN_BUILDS` neben Build und Version. |
 | E-19 | TanStack Table **v8** statt des frisch erschienenen v9 | v9 stellt Reaktivität auf TanStack-Store-Atoms und `table.Subscribe` um und verlangt explizites Feature-Opt-in. Keines der neuen Features wird hier gebraucht, die Testbarkeit litte. Die Spaltendefinitionen sind weitgehend portierbar, ein Wechsel bleibt später möglich. |
 
 ---
@@ -1014,6 +1028,7 @@ Identitäts-Anker ist der teuerste denkbare Bug in diesem System.
 | Manager-Logging: lokal Datei oder in-app Log-Viewer? | beides, default Datei + UI-Tab |
 | Telemetry (anonymisiert): Crash-Reports? | nicht in MVP, später diskutieren |
 | Doku-Sprache: Repo-Doku ist Deutsch, UI ist de/en/fr | offen — für ein öffentliches Repo wäre EN als Doku-Quellsprache konsistenter |
+| Charakterwahl merken (localStorage) | offen — bis dahin steht die Aktiv-Spalte nach jedem Start auf „—", bis ein Charakter gewählt wird |
 | Virtualisierung der Addon-Liste | offen — 242 Zeilen rendert der Webview problemlos; erst nötig, wenn Bestände in die Tausende gehen |
 | Visuelle Regressionstests (Screenshots) | offen — das Theme ist derzeit nur manuell geprüft; die Tests decken Verhalten ab, nicht Aussehen |
 

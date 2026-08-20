@@ -48,6 +48,12 @@ pub struct Addon {
     /// Erste 12 Hex-Zeichen für die Anzeige.
     pub tree_sha_short: Option<String>,
     pub mode: Mode,
+    /// `## DefaultState` aus der `.toc` — nur der Anfangszustand beim ersten
+    /// Sehen, **nicht** ob das Addon aktuell aktiv ist. Dafür siehe `enabled`.
+    pub default_state: Option<String>,
+    /// Tatsächlicher Zustand laut `AddOns.txt` des gewählten Charakters.
+    /// `None` = kein Charakter gewählt oder dem Client noch nie begegnet.
+    pub enabled: Option<bool>,
     pub file_count: usize,
     pub size_bytes: u64,
     /// Kam der Hash aus dem Cache statt aus einer Neuberechnung?
@@ -125,7 +131,18 @@ impl HashCache {
 /// Der Cache wird anschließend **neu aufgebaut** statt ergänzt: Einträge zu
 /// gelöschten Addons verschwinden damit von selbst, statt die Datei über Jahre
 /// wachsen zu lassen.
-pub fn scan(addons_dir: &Path, cache: &mut HashCache) -> std::io::Result<Scan> {
+///
+/// `states` bildet kleingeschriebene Addon-IDs auf ihren Zustand ab (siehe
+/// `wtf::read_states`). `progress` wird nach jedem fertigen Ordner mit
+/// `(erledigt, gesamt, id)` gerufen — die Zählung erfolgt am Ende in
+/// deterministischer Reihenfolge, nicht aus den Rayon-Threads heraus, damit die
+/// Anzeige nicht springt.
+pub fn scan_with(
+    addons_dir: &Path,
+    cache: &mut HashCache,
+    states: &HashMap<String, bool>,
+    progress: &(dyn Fn(usize, usize, &str) + Sync),
+) -> std::io::Result<Scan> {
     let mut folders: Vec<PathBuf> = Vec::new();
     for entry in std::fs::read_dir(addons_dir)? {
         let entry = entry?;
@@ -137,9 +154,16 @@ pub fn scan(addons_dir: &Path, cache: &mut HashCache) -> std::io::Result<Scan> {
     folders.sort();
 
     let previous = std::mem::take(&mut cache.entries);
+    let total = folders.len();
+    let done = std::sync::atomic::AtomicUsize::new(0);
     let outcomes: Vec<Outcome> = folders
         .par_iter()
-        .map(|folder| scan_one(folder, &previous))
+        .map(|folder| {
+            let outcome = scan_one(folder, &previous, states);
+            let count = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            progress(count, total, outcome.id());
+            outcome
+        })
         .collect();
 
     let mut scan = Scan::default();
@@ -169,7 +193,20 @@ enum Outcome {
     Skipped(Skipped),
 }
 
-fn scan_one(folder: &Path, previous: &HashMap<String, CacheEntry>) -> Outcome {
+impl Outcome {
+    fn id(&self) -> &str {
+        match self {
+            Outcome::Addon(addon, _) => &addon.id,
+            Outcome::Skipped(skipped) => &skipped.id,
+        }
+    }
+}
+
+fn scan_one(
+    folder: &Path,
+    previous: &HashMap<String, CacheEntry>,
+    states: &HashMap<String, bool>,
+) -> Outcome {
     let id = folder
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -209,6 +246,8 @@ fn scan_one(folder: &Path, previous: &HashMap<String, CacheEntry>) -> Outcome {
         interface: toc.interface().map(str::to_string),
         notes: toc.notes().map(str::to_string),
         author: toc.author().map(str::to_string),
+        default_state: toc.get("DefaultState").map(str::to_string),
+        enabled: states.get(&id.to_ascii_lowercase()).copied(),
         id: id.clone(),
         path: folder.to_string_lossy().into_owned(),
         tree_sha: None,
@@ -309,6 +348,11 @@ mod tests {
         }
     }
 
+    /// Scan ohne Charakter-Zustände und ohne Fortschritts-Empfänger.
+    fn scan(dir: &Path, cache: &mut HashCache) -> std::io::Result<Scan> {
+        scan_with(dir, cache, &HashMap::new(), &|_, _, _| {})
+    }
+
     fn find<'a>(scan: &'a Scan, id: &str) -> &'a Addon {
         // `expect` statt `unwrap_or_else(|| panic!(…))`: letzteres erzeugt eine
         // Closure, die bei grünen Tests nie läuft und das 100-%-Gate reißt.
@@ -316,6 +360,84 @@ mod tests {
             .iter()
             .find(|addon| addon.id == id)
             .expect("Addon sollte im Scan sein")
+    }
+
+    // ------------------------------------ DefaultState, Aktiv-Zustand, Fortschritt
+
+    #[test]
+    fn liest_default_state_aus_der_toc() {
+        let tree = TempAddons::new("default-state");
+        tree.addon("A", "## Interface: 11200\n## DefaultState: enabled\n");
+        tree.addon("B", "## Interface: 11200\n");
+        let mut cache = HashCache::default();
+        let scan = scan(tree.path(), &mut cache).unwrap();
+        assert_eq!(find(&scan, "A").default_state.as_deref(), Some("enabled"));
+        assert_eq!(find(&scan, "B").default_state, None);
+    }
+
+    #[test]
+    fn uebernimmt_den_aktiv_zustand_case_insensitiv() {
+        // Der Client führt die Schreibweise nicht zwingend wie den Ordnernamen.
+        let tree = TempAddons::new("enabled");
+        tree.addon("pfQuest", "## Interface: 11200\n");
+        tree.addon("ChatLog", "## Interface: 11200\n");
+        tree.addon("Unbekannt", "## Interface: 11200\n");
+
+        let states = HashMap::from([
+            ("pfquest".to_string(), true),
+            ("chatlog".to_string(), false),
+        ]);
+        let mut cache = HashCache::default();
+        let scan = scan_with(tree.path(), &mut cache, &states, &|_, _, _| {}).unwrap();
+
+        assert_eq!(find(&scan, "pfQuest").enabled, Some(true));
+        assert_eq!(find(&scan, "ChatLog").enabled, Some(false));
+        // Dem Client noch nie begegnet — das ist etwas anderes als „deaktiviert".
+        assert_eq!(find(&scan, "Unbekannt").enabled, None);
+    }
+
+    #[test]
+    fn ohne_charakter_bleibt_der_zustand_unbekannt() {
+        let tree = TempAddons::new("no-character");
+        tree.addon("A", "## Interface: 11200\n");
+        let mut cache = HashCache::default();
+        assert_eq!(
+            find(&scan(tree.path(), &mut cache).unwrap(), "A").enabled,
+            None
+        );
+    }
+
+    #[test]
+    fn meldet_fortschritt_fuer_jeden_ordner_genau_einmal() {
+        let tree = TempAddons::new("progress");
+        for id in ["A", "B", "C"] {
+            tree.addon(id, "## Interface: 11200\n");
+        }
+        // Ohne .toc — muss trotzdem gezählt werden, sonst bliebe der Balken stehen.
+        fs::create_dir_all(tree.path().join("KeinAddon")).unwrap();
+
+        let seen = std::sync::Mutex::new(Vec::new());
+        let mut cache = HashCache::default();
+        scan_with(
+            tree.path(),
+            &mut cache,
+            &HashMap::new(),
+            &|done, total, id| {
+                seen.lock().unwrap().push((done, total, id.to_string()));
+            },
+        )
+        .unwrap();
+
+        let seen = seen.into_inner().unwrap();
+        assert_eq!(seen.len(), 4);
+        assert!(seen.iter().all(|(_, total, _)| *total == 4));
+        // Der Zähler läuft lückenlos von 1 bis 4, auch über die Rayon-Threads.
+        let mut counts: Vec<usize> = seen.iter().map(|(done, _, _)| *done).collect();
+        counts.sort_unstable();
+        assert_eq!(counts, [1, 2, 3, 4]);
+        let mut ids: Vec<&str> = seen.iter().map(|(_, _, id)| id.as_str()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["A", "B", "C", "KeinAddon"]);
     }
 
     // ------------------------------------------------------------ Grundfall

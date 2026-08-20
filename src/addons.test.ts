@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  countOutdated,
+  interfaceStatus,
   cacheRatio,
   compareTitles,
   fmtCount,
@@ -21,6 +23,8 @@ function addon(overrides: Partial<Addon> = {}): Addon {
     tree_sha: "7c1d90ffaa11223344556677889900aabbccddeeff00112233445566778899aa",
     tree_sha_short: "7c1d90ffaa11",
     mode: "consumer",
+    default_state: "disabled",
+    enabled: null,
     file_count: 2310,
     size_bytes: 78_000_000,
     cached: false,
@@ -116,5 +120,38 @@ describe("cacheRatio", () => {
 
   it("liefert 0 statt NaN bei leerem Scan", () => {
     expect(cacheRatio(scan(0, 0))).toBe(0);
+  });
+});
+
+describe("interfaceStatus", () => {
+  it("erkennt passende und abweichende Interface-Versionen", () => {
+    expect(interfaceStatus(addon({ interface: "11200" }), "11200")).toBe("current");
+    expect(interfaceStatus(addon({ interface: "11000" }), "11200")).toBe("outdated");
+  });
+
+  it("ignoriert umgebende Leerzeichen", () => {
+    // "## Interface: 11200 " mit Trailing-Space kommt im echten Bestand vor.
+    expect(interfaceStatus(addon({ interface: "11200 " }), "11200")).toBe("current");
+  });
+
+  it("behauptet nichts, wenn eine Seite fehlt", () => {
+    expect(interfaceStatus(addon({ interface: null }), "11200")).toBe("unknown");
+    expect(interfaceStatus(addon({ interface: "11200" }), null)).toBe("unknown");
+  });
+});
+
+describe("countOutdated", () => {
+  it("zählt nur die tatsächlich veralteten", () => {
+    const addons = [
+      addon({ interface: "11200" }),
+      addon({ interface: "11000" }),
+      addon({ interface: "11100" }),
+      addon({ interface: null }),
+    ];
+    expect(countOutdated(addons, "11200")).toBe(2);
+  });
+
+  it("zählt nichts ohne bekannte Client-Version", () => {
+    expect(countOutdated([addon({ interface: "11000" })], null)).toBe(0);
   });
 });

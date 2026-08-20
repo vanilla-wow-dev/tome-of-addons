@@ -18,6 +18,8 @@ function addon(overrides: Partial<Addon> = {}): Addon {
     tree_sha: "7c1d90ffaa11223344556677889900aabbccddeeff00112233445566778899aa",
     tree_sha_short: "7c1d90ffaa11",
     mode: "consumer",
+    default_state: "disabled",
+    enabled: null,
     file_count: 2310,
     size_bytes: 78_000_000,
     cached: false,
@@ -61,8 +63,28 @@ const SCAN: AddonScan = {
   hashed: 2,
 };
 
-function mountTable(scan: AddonScan = SCAN) {
-  return mount(AddonTable, { props: { scan } });
+const CHARACTERS = [
+  {
+    account: "RYLON8",
+    realm: "NostalGeek 1.12",
+    name: "Zinnober",
+    path: "/wtf/Zinnober/AddOns.txt",
+    label: "Zinnober · NostalGeek 1.12 (RYLON8)",
+  },
+];
+
+function mountTable(
+  scan: AddonScan = SCAN,
+  opts: { clientInterface?: string | null; characters?: typeof CHARACTERS } = {},
+) {
+  return mount(AddonTable, {
+    props: {
+      scan,
+      characters: opts.characters ?? [],
+      clientInterface: opts.clientInterface ?? null,
+      character: null,
+    },
+  });
 }
 
 /** Titelspalte aller sichtbaren Datenzeilen, in Anzeigereihenfolge. */
@@ -98,10 +120,15 @@ describe("AddonTable – Darstellung", () => {
     expect(accountant.findAll("td")[1].text()).toBe("—");
   });
 
-  it("hebt Developer-Mode vom Consumer-Mode ab", () => {
+  it("benennt nur Git-Checkouts, behauptet sonst nichts", () => {
+    // „ZIP" wäre erfunden: wir sehen nur, ob ein .git/ da ist. Woher die
+    // übrigen Dateien stammen, wissen wir nicht.
     const wrapper = mountTable();
     expect(wrapper.text()).toContain("Git");
-    expect(wrapper.text()).toContain("ZIP");
+    expect(wrapper.text()).not.toContain("ZIP");
+    const modeCell = (row: number) => wrapper.findAll("tbody tr")[row].findAll("td")[5].text();
+    expect(modeCell(0)).toBe("");
+    expect(modeCell(1)).toBe("Git");
   });
 });
 
@@ -116,9 +143,9 @@ describe("AddonTable – Sortierung", () => {
     // Bei „Dateien" und „Größe" ist „größte zuerst" die nützlichere Erwartung
     // als „14 Dateien zuerst" — TanStack macht das für Zahlen von sich aus.
     const wrapper = mountTable();
-    await wrapper.findAll("thead button")[4].trigger("click");
+    await wrapper.findAll("thead button")[6].trigger("click");
     expect(titles(wrapper)).toEqual(["pfQuest", "Invite-o-matik", "Accountant"]);
-    await wrapper.findAll("thead button")[4].trigger("click");
+    await wrapper.findAll("thead button")[6].trigger("click");
     expect(titles(wrapper)).toEqual(["Accountant", "Invite-o-matik", "pfQuest"]);
   });
 
@@ -128,7 +155,7 @@ describe("AddonTable – Sortierung", () => {
     // Accountant hat keine Version und sortiert als Leerstring nach vorn.
     expect(titles(wrapper)).toEqual(["Accountant", "Invite-o-matik", "pfQuest"]);
 
-    await wrapper.findAll("thead button")[2].trigger("click");
+    await wrapper.findAll("thead button")[3].trigger("click");
     expect(titles(wrapper)).toEqual(["Accountant", "pfQuest", "Invite-o-matik"]);
   });
 
@@ -212,6 +239,123 @@ describe("AddonTable – Detail-Ausklappung", () => {
   });
 });
 
+describe("AddonTable – Interface-Version", () => {
+  it("markiert Addons, die der Client nicht ohne Weiteres lädt", () => {
+    const scan: AddonScan = {
+      ...SCAN,
+      addons: [
+        addon({ id: "Aktuell", title: "Aktuell", interface: "11200" }),
+        addon({ id: "Alt", title: "Alt", interface: "11000" }),
+        addon({ id: "Ohne", title: "Ohne", interface: null }),
+      ],
+    };
+    const wrapper = mountTable(scan, { clientInterface: "11200" });
+    const cell = (row: number) => wrapper.findAll("tbody tr")[row].findAll("td")[2];
+
+    expect(cell(0).text()).toBe("11200");
+    expect(cell(0).html()).not.toContain("⚠");
+    expect(cell(1).text()).toContain("11000");
+    expect(cell(1).html()).toContain("⚠");
+    expect(cell(2).text()).toBe("—");
+  });
+
+  it("lässt sich nach Interface-Version sortieren", async () => {
+    const scan: AddonScan = {
+      ...SCAN,
+      addons: [
+        addon({ id: "Neu", title: "Neu", interface: "11200" }),
+        addon({ id: "Alt", title: "Alt", interface: "11000" }),
+        addon({ id: "Ohne", title: "Ohne", interface: null }),
+      ],
+    };
+    const wrapper = mountTable(scan, { clientInterface: "11200" });
+    await wrapper.findAll("thead button")[2].trigger("click");
+    expect(titles(wrapper)).toEqual(["Ohne", "Alt", "Neu"]);
+  });
+
+  it("erklärt den Grund, statt nur zu markieren", () => {
+    const scan: AddonScan = {
+      ...SCAN,
+      addons: [addon({ id: "Alt", title: "Alt", interface: "11000" })],
+    };
+    const wrapper = mountTable(scan, { clientInterface: "11200" });
+    // Ohne diesen Hinweis sucht der Nutzer den Fehler beim Addon.
+    expect(wrapper.text()).toContain("Veraltete AddOns laden");
+    expect(wrapper.text()).toContain("11200");
+  });
+
+  it("behauptet nichts, wenn die Client-Version unbekannt ist", () => {
+    const wrapper = mountTable(SCAN, { clientInterface: null });
+    expect(wrapper.html()).not.toContain("⚠");
+    expect(wrapper.text()).not.toContain("Veraltete AddOns laden");
+  });
+
+  it("filtert auf veraltete Addons", async () => {
+    const scan: AddonScan = {
+      ...SCAN,
+      addons: [
+        addon({ id: "Aktuell", title: "Aktuell", interface: "11200" }),
+        addon({ id: "Alt", title: "Alt", interface: "11000" }),
+      ],
+    };
+    const wrapper = mountTable(scan, { clientInterface: "11200" });
+    const checkbox = wrapper.findAll("input[type=checkbox]")[1];
+    await checkbox.setValue(true);
+    expect(titles(wrapper)).toEqual(["Alt"]);
+  });
+});
+
+describe("AddonTable – Aktiv-Zustand", () => {
+  const scan: AddonScan = {
+    ...SCAN,
+    addons: [
+      addon({ id: "An", title: "An", enabled: true }),
+      addon({ id: "Aus", title: "Aus", enabled: false }),
+      addon({ id: "Ungesehen", title: "Ungesehen", enabled: null }),
+    ],
+  };
+
+  it("unterscheidet aktiv, aus und nie gesehen", () => {
+    const wrapper = mountTable(scan);
+    const cell = (row: number) => wrapper.findAll("tbody tr")[row].findAll("td")[4].text();
+    expect(cell(0)).toBe("aktiv");
+    expect(cell(1)).toBe("aus");
+    // „Nie gesehen" ist etwas anderes als „abgeschaltet".
+    expect(cell(2)).toBe("—");
+  });
+
+  it("sortiert nie-gesehen zwischen aus und aktiv", async () => {
+    // Erster Klick absteigend (Zahlenspalte) — hier die nützlichere Vorgabe:
+    // „was ist aktiv" zuerst. Entscheidend ist die Mitte: nie gesehen liegt
+    // zwischen aus und aktiv, statt mit einem von beiden zu verschmelzen.
+    const wrapper = mountTable(scan);
+    await wrapper.findAll("thead button")[4].trigger("click");
+    expect(titles(wrapper)).toEqual(["An", "Ungesehen", "Aus"]);
+    await wrapper.findAll("thead button")[4].trigger("click");
+    expect(titles(wrapper)).toEqual(["Aus", "Ungesehen", "An"]);
+  });
+
+  it("bietet die Charakter-Auswahl nur an, wenn es Charaktere gibt", async () => {
+    expect(mountTable(scan).findAll("select")).toHaveLength(0);
+
+    const wrapper = mountTable(scan, { characters: CHARACTERS });
+    const select = wrapper.find("select");
+    expect(select.text()).toContain("Zinnober · NostalGeek 1.12 (RYLON8)");
+
+    await select.setValue("/wtf/Zinnober/AddOns.txt");
+    const emitted = wrapper.emitted("update:character") ?? [];
+    expect(emitted[emitted.length - 1]).toEqual(["/wtf/Zinnober/AddOns.txt"]);
+  });
+
+  it("zeigt DefaultState im Detail, getrennt vom echten Zustand", async () => {
+    const wrapper = mountTable(scan);
+    await wrapper.findAll("tbody tr")[0].find("td button").trigger("click");
+    const detail = wrapper.findAll("tbody tr")[1].text();
+    expect(detail).toContain("DefaultState");
+    expect(detail).toContain("disabled");
+  });
+});
+
 describe("AddonTable – Fehlerfälle", () => {
   const brokenScan: AddonScan = {
     ...SCAN,
@@ -232,7 +376,7 @@ describe("AddonTable – Fehlerfälle", () => {
     const wrapper = mountTable(brokenScan);
     expect(wrapper.text()).toContain("Kaputt");
     expect(wrapper.text()).toContain("Fehler");
-    expect(wrapper.findAll("tbody tr")[0].findAll("td")[2].text()).toBe("—");
+    expect(wrapper.findAll("tbody tr")[0].findAll("td")[3].text()).toBe("—");
 
     await wrapper.findAll("tbody tr")[0].find("td button").trigger("click");
     expect(wrapper.text()).toContain("symlink is not hashable");
@@ -308,6 +452,22 @@ describe("AddonTable – übersprungene Ordner", () => {
     await toggle.trigger("click");
     expect(wrapper.text()).toContain("BlizzardPlates");
     expect(wrapper.text()).toContain("kein BlizzardPlates.toc");
+  });
+
+  it("beugt Singular und Plural korrekt", () => {
+    setLocale("en");
+    const one = mountTable();
+    expect(one.text()).toContain("1 folder skipped");
+    expect(one.text()).not.toContain("1 folders");
+
+    const many = mountTable({
+      ...SCAN,
+      skipped: [
+        { id: "A", reason: "kein A.toc" },
+        { id: "B", reason: "kein B.toc" },
+      ],
+    });
+    expect(many.text()).toContain("2 folders skipped");
   });
 
   it("blendet den Abschnitt aus, wenn nichts übersprungen wurde", () => {

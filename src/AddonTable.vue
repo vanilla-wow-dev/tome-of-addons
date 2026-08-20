@@ -12,19 +12,30 @@ import {
 } from "@tanstack/vue-table";
 import {
   compareTitles,
+  countOutdated,
   fmtCount,
+  interfaceStatus,
   matchesQuery,
   shortHash,
   type Addon,
   type AddonScan,
+  type Character,
 } from "./addons";
 import { fmtBytes } from "./wow";
 
-const props = defineProps<{ scan: AddonScan }>();
+const props = defineProps<{
+  scan: AddonScan;
+  characters: Character[];
+  /** Interface-Version des Clients, Bezugswert für die Veraltet-Erkennung. */
+  clientInterface: string | null;
+}>();
+/** Pfad zur AddOns.txt des gewählten Charakters, `null` = keiner gewählt. */
+const character = defineModel<string | null>("character", { required: true });
 const { t } = useI18n();
 
 const query = ref("");
 const developerOnly = ref(false);
+const outdatedOnly = ref(false);
 const sorting = ref<SortingState>([{ id: "title", desc: false }]);
 const expanded = ref<ExpandedState>({});
 const showSkipped = ref(false);
@@ -39,9 +50,13 @@ const copied = ref<string | null>(null);
 const rows = computed(() =>
   props.scan.addons.filter(
     (addon) =>
-      (!developerOnly.value || addon.mode === "developer") && matchesQuery(addon, query.value),
+      (!developerOnly.value || addon.mode === "developer") &&
+      (!outdatedOnly.value || interfaceStatus(addon, props.clientInterface) === "outdated") &&
+      matchesQuery(addon, query.value),
   ),
 );
+
+const outdatedCount = computed(() => countOutdated(props.scan.addons, props.clientInterface));
 
 const columnHelper = createColumnHelper<Addon>();
 const columns = [
@@ -50,7 +65,13 @@ const columns = [
     sortingFn: (a, b) => compareTitles(a.original, b.original),
   }),
   columnHelper.accessor((addon) => addon.version ?? "", { id: "version" }),
+  columnHelper.accessor((addon) => addon.interface ?? "", { id: "interface" }),
   columnHelper.accessor((addon) => addon.tree_sha_short ?? "", { id: "hash" }),
+  // Unbekannt sortiert zwischen aktiv und inaktiv, statt mit einem der beiden
+  // zu verschmelzen — „nie gesehen" ist etwas anderes als „abgeschaltet".
+  columnHelper.accessor((addon) => (addon.enabled === null ? 1 : addon.enabled ? 2 : 0), {
+    id: "enabled",
+  }),
   columnHelper.accessor("mode", { id: "mode" }),
   columnHelper.accessor("file_count", { id: "files" }),
   columnHelper.accessor("size_bytes", { id: "size" }),
@@ -113,14 +134,40 @@ async function copyHash(addon: Addon) {
         :placeholder="t('addons.search')"
         :aria-label="t('addons.search')"
       />
+      <label v-if="props.characters.length" class="flex items-center gap-2 text-sm">
+        <span class="opacity-70">{{ t("addons.character") }}</span>
+        <select v-model="character" class="tome-input text-sm">
+          <option :value="null">{{ t("addons.noCharacter") }}</option>
+          <option v-for="c in props.characters" :key="c.path" :value="c.path">
+            {{ c.label }}
+          </option>
+        </select>
+      </label>
       <label class="flex cursor-pointer items-center gap-2 text-sm">
         <input v-model="developerOnly" type="checkbox" class="accent-gold-700" />
         {{ t("addons.developerOnly") }}
+      </label>
+      <label
+        v-if="outdatedCount"
+        class="text-verdict-warn dark:text-verdict-warn-dark flex cursor-pointer items-center gap-2 text-sm"
+      >
+        <input v-model="outdatedOnly" type="checkbox" class="accent-gold-700" />
+        {{ t("addons.outdatedOnly", { n: outdatedCount }) }}
       </label>
       <p class="tome-data ml-auto opacity-70">
         {{ t("addons.count", { shown: rows.length, total: props.scan.addons.length }) }}
       </p>
     </div>
+
+    <!-- Der Client lädt veraltete Addons nur mit dem entsprechenden Haken im
+         AddOn-Fenster. Ohne diesen Hinweis sucht der Nutzer den Fehler beim
+         Addon statt bei der Interface-Version. -->
+    <p
+      v-if="outdatedCount"
+      class="text-verdict-warn dark:text-verdict-warn-dark mb-4 text-sm"
+    >
+      {{ t("addons.outdatedHint", { n: outdatedCount, client: props.clientInterface }, outdatedCount) }}
+    </p>
 
     <div class="overflow-x-auto">
       <table class="w-full border-collapse text-left">
@@ -186,16 +233,56 @@ async function copyHash(addon: Addon) {
                 </button>
               </td>
               <td class="tome-data py-1.5 pr-3">{{ row.original.version ?? "—" }}</td>
+              <td class="py-1.5 pr-3">
+                <span
+                  v-if="row.original.interface"
+                  :class="[
+                    'tome-data',
+                    interfaceStatus(row.original, props.clientInterface) === 'outdated'
+                      ? 'text-verdict-warn dark:text-verdict-warn-dark font-semibold'
+                      : '',
+                  ]"
+                  :title="
+                    interfaceStatus(row.original, props.clientInterface) === 'outdated'
+                      ? t('addons.outdatedTitle', { client: props.clientInterface })
+                      : ''
+                  "
+                  >{{ row.original.interface
+                  }}<span
+                    v-if="interfaceStatus(row.original, props.clientInterface) === 'outdated'"
+                    class="ml-1"
+                    >⚠</span
+                  ></span
+                >
+                <span v-else class="tome-data opacity-50">—</span>
+              </td>
               <td class="tome-data py-1.5 pr-3">{{ shortHash(row.original) }}</td>
               <td class="py-1.5 pr-3">
                 <span
-                  :class="[
-                    'tome-badge',
-                    row.original.mode === 'developer'
-                      ? 'text-verdict-warn dark:text-verdict-warn-dark'
-                      : 'opacity-70',
-                  ]"
-                  >{{ t(`addons.mode.${row.original.mode}`) }}</span
+                  v-if="row.original.enabled === true"
+                  class="tome-badge text-verdict-ok dark:text-verdict-ok-dark"
+                  >{{ t("addons.enabled") }}</span
+                >
+                <span
+                  v-else-if="row.original.enabled === false"
+                  class="tome-badge opacity-50"
+                  >{{ t("addons.disabled") }}</span
+                >
+                <span
+                  v-else
+                  class="tome-data opacity-40"
+                  :title="t('addons.unseenTitle')"
+                  >—</span
+                >
+              </td>
+              <td class="py-1.5 pr-3">
+                <!-- Nur die Ausnahme benennen: „Git-Checkout". Ob die übrigen
+                     Dateien aus einem ZIP, von Hand oder von einem anderen
+                     Manager stammen, wissen wir nicht — „ZIP" wäre erfunden. -->
+                <span
+                  v-if="row.original.mode === 'developer'"
+                  class="tome-badge text-verdict-warn dark:text-verdict-warn-dark"
+                  >{{ t("addons.mode.developer") }}</span
                 >
               </td>
               <td class="tome-data py-1.5 pr-3 text-right">
@@ -205,13 +292,23 @@ async function copyHash(addon: Addon) {
             </tr>
 
             <tr v-if="row.getIsExpanded()" class="border-b border-ink-500/15">
-              <td colspan="6" class="bg-gold-500/5 px-6 py-3">
+              <td colspan="8" class="bg-gold-500/5 px-6 py-3">
                 <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
                   <dt class="opacity-60">{{ t("addons.detail.author") }}</dt>
                   <dd>{{ row.original.author ?? "—" }}</dd>
 
                   <dt class="opacity-60">{{ t("addons.detail.interface") }}</dt>
-                  <dd class="tome-data">{{ row.original.interface ?? "—" }}</dd>
+                  <dd class="tome-data">
+                    {{ row.original.interface ?? "—" }}
+                    <span
+                      v-if="interfaceStatus(row.original, props.clientInterface) === 'outdated'"
+                      class="text-verdict-warn dark:text-verdict-warn-dark"
+                      >{{ t("addons.outdatedTitle", { client: props.clientInterface }) }}</span
+                    >
+                  </dd>
+
+                  <dt class="opacity-60">{{ t("addons.detail.defaultState") }}</dt>
+                  <dd class="tome-data">{{ row.original.default_state ?? "—" }}</dd>
 
                   <dt class="opacity-60">{{ t("addons.detail.notes") }}</dt>
                   <dd>{{ row.original.notes ?? "—" }}</dd>
@@ -247,7 +344,7 @@ async function copyHash(addon: Addon) {
           </template>
 
           <tr v-if="rows.length === 0">
-            <td colspan="6" class="py-6 text-center opacity-70">{{ t("addons.empty") }}</td>
+            <td colspan="8" class="py-6 text-center opacity-70">{{ t("addons.empty") }}</td>
           </tr>
         </tbody>
       </table>
@@ -264,7 +361,7 @@ async function copyHash(addon: Addon) {
         @click="showSkipped = !showSkipped"
       >
         <span aria-hidden="true">{{ showSkipped ? "▼" : "▸" }}</span>
-        {{ t("addons.skipped", { n: props.scan.skipped.length }) }}
+        {{ t("addons.skipped", { n: props.scan.skipped.length }, props.scan.skipped.length) }}
       </button>
       <ul v-if="showSkipped" class="mt-2 space-y-1 text-sm">
         <li v-for="folder in props.scan.skipped" :key="folder.id" class="flex flex-wrap gap-2">

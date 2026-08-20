@@ -28,6 +28,12 @@ struct KnownBuild {
     locale: &'static str,
     /// SHA-1 der offiziellen, unveränderten `WoW.exe` (lowercase hex).
     sha1: &'static str,
+    /// Interface-Version dieses Clients, z. B. "11200".
+    ///
+    /// Der Client lädt Addons, deren `## Interface` davon abweicht, nur mit
+    /// aktiviertem „Veraltete AddOns laden". Das ist damit der Bezugswert für
+    /// die Veraltet-Erkennung im Addon-Scanner.
+    interface: &'static str,
 }
 
 /// Tabelle bekannter offizieller `WoW.exe`-Hashes.
@@ -40,6 +46,7 @@ const KNOWN_BUILDS: &[KnownBuild] = &[KnownBuild {
     version: "1.12.1",
     locale: "enUS",
     sha1: "893def24f703fd18c1514d31b92f00e616d8375f",
+    interface: "11200",
 }];
 
 /// Verdikt des Identitäts-Abgleichs.
@@ -74,6 +81,9 @@ pub struct WowExeInfo {
     pub md5: String,
     /// Ergebnis des Abgleichs gegen die Referenz-Tabelle.
     pub identity: ExeIdentity,
+    /// Interface-Version des Clients (z. B. "11200"), sofern der Build bekannt
+    /// ist. Bezugswert für die Veraltet-Erkennung von Addons.
+    pub interface_version: Option<String>,
 }
 
 /// Sucht das erste Vorkommen von `needle` in `haystack`.
@@ -127,6 +137,19 @@ fn parse_build_string(bytes: &[u8]) -> (Option<u32>, Option<String>) {
     (None, None)
 }
 
+/// Interface-Version des Clients zu einer Build-Nummer.
+///
+/// Bewusst an der Build-Nummer und nicht am Hash festgemacht: ein gepatchter
+/// Client (vanilla-tweaks, Widescreen-Fix) bleibt derselbe Client und lädt
+/// dieselben Addons.
+fn interface_for_build(build: Option<u32>) -> Option<String> {
+    let build = build?;
+    KNOWN_BUILDS
+        .iter()
+        .find(|k| k.build == build)
+        .map(|k| k.interface.to_string())
+}
+
 /// Bestimmt das Identitäts-Verdikt aus Hash und Build-Nummer.
 fn classify(sha1: &str, build: Option<u32>) -> ExeIdentity {
     // 1. Exakter Hash-Match gegen offizielle Referenz?
@@ -167,7 +190,24 @@ pub fn inspect_wow_exe(root: &Path) -> Result<WowExeInfo, String> {
         sha1,
         md5,
         identity,
+        interface_version: interface_for_build(build),
     })
+}
+
+#[cfg(test)]
+mod tests_interface {
+    use super::*;
+
+    #[test]
+    fn interface_version_follows_the_build_number() {
+        assert_eq!(interface_for_build(Some(5875)).as_deref(), Some("11200"));
+    }
+
+    #[test]
+    fn unknown_or_missing_build_has_no_interface_version() {
+        assert_eq!(interface_for_build(Some(9999)), None);
+        assert_eq!(interface_for_build(None), None);
+    }
 }
 
 #[cfg(test)]
@@ -348,9 +388,11 @@ mod tests {
                 sha1: "a".into(),
                 md5: "b".into(),
                 identity: v,
+                interface_version: Some("11200".into()),
             };
             let json = serde_json::to_string(&info).unwrap();
             assert!(json.contains("\"status\""));
+            assert!(json.contains("\"interface_version\":\"11200\""));
             // Clone + Debug der abgeleiteten Impls ausführen (sonst nie aufgerufen).
             let _ = format!("{:?}", info.clone());
         }

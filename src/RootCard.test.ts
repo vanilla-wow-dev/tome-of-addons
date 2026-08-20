@@ -22,6 +22,7 @@ function exe(identity: WowExeInfo["identity"], extra: Partial<WowExeInfo> = {}):
     sha1: "a",
     md5: "b",
     identity,
+    interface_version: "11200",
     ...extra,
   };
 }
