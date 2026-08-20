@@ -2,6 +2,31 @@
 export default {
   tagline: "Le répertoire organisé des addons WoW 1.12.1.",
   language: "Langue",
+  nav: {
+    label: "Sections",
+    wow: "État de WoW",
+    addons: "Extensions",
+    characters: "Personnages",
+    health: { ok: "Tout va bien", warn: "Avec réserves", error: "Aucune installation" },
+  },
+  health: {
+    notManaged: "Tome of Addons n’est pas dans un dossier WoW et ne gère aucune installation.",
+    clientRunningHere:
+      "WoW est en cours d’exécution. Les modifications des SavedVariables seront écrasées à la fermeture, et les extensions nouvellement installées ne seront prises en compte qu’après un redémarrage.",
+    clientRunningUnknown:
+      "Un processus WoW est actif mais n’a pu être rattaché à aucune installation. S’il s’agit de celle-ci, des modifications peuvent être perdues.",
+    noAddonsFolder: "Aucun dossier Interface/AddOns — rien ne peut encore être installé.",
+    exe: {
+      modified: "WoW.exe est modifié (l’empreinte diffère de l’officielle).",
+      "unknown-build": "Build inconnu — aucune empreinte de référence officielle.",
+      unknown: "Client WoW non reconnaissable.",
+    },
+  },
+  character: {
+    tally: "{on} actives · {off} inactives · {unseen} jamais vues",
+    activeButOutdated:
+      "{n} extension active est obsolète et ne sera pas chargée malgré la case cochée. | {n} extensions actives sont obsolètes et ne seront pas chargées malgré la case cochée.",
+  },
   wow: {
     searching: "Recherche d’une installation WoW…",
     managed: "Géré",

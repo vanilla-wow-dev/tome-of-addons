@@ -2,6 +2,31 @@
 export default {
   tagline: "The curated tome of WoW 1.12.1 addons.",
   language: "Language",
+  nav: {
+    label: "Sections",
+    wow: "WoW status",
+    addons: "Addons",
+    characters: "Characters",
+    health: { ok: "All good", warn: "With caveats", error: "No installation" },
+  },
+  health: {
+    notManaged: "Tome of Addons is not inside a WoW folder and manages no installation.",
+    clientRunningHere:
+      "WoW is running. Changes to SavedVariables are overwritten on exit, and newly installed addons are only picked up after a restart.",
+    clientRunningUnknown:
+      "A WoW process is running but could not be matched to an installation. If it is this one, changes may be lost.",
+    noAddonsFolder: "No Interface/AddOns folder — nothing can be installed yet.",
+    exe: {
+      modified: "WoW.exe is patched (differs from the official hash).",
+      "unknown-build": "Unknown build — no official reference hash available.",
+      unknown: "Not a recognizable WoW client.",
+    },
+  },
+  character: {
+    tally: "{on} on · {off} off · {unseen} never seen",
+    activeButOutdated:
+      "{n} enabled addon is out of date and will not load despite being ticked. | {n} enabled addons are out of date and will not load despite being ticked.",
+  },
   wow: {
     searching: "Looking for a WoW installation…",
     managed: "Managed",

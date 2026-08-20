@@ -27,6 +27,8 @@ sha1 = "0.10"
 md-5 = "0.10"
 hex = "0.4"
 rayon = "1"
+# Nur die Prozess-Liste; Disk/Network/Components brauchen wir nicht.
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 toa-tree-hash = { path = "../crates/tree-hash" }
 toa-toc = { path = "../crates/toc" }
 

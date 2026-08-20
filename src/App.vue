@@ -7,10 +7,18 @@ import { getVersion } from "@tauri-apps/api/app";
 import { check, Update } from "@tauri-apps/plugin-updater";
 import { relaunch, exit } from "@tauri-apps/plugin-process";
 import { type WowRoot, type WowExeInfo, type Detection, fmtBytes } from "./wow";
-import { type AddonScan, type Character, type ScanProgress } from "./addons";
+import {
+  installationHealth,
+  type AddonScan,
+  type Character,
+  type ClientState,
+  type ScanProgress,
+} from "./addons";
 import { SUPPORTED_LOCALES, setLocale, type Locale } from "./i18n";
-import RootCard from "./RootCard.vue";
+import SideBar from "./SideBar.vue";
+import WowView from "./WowView.vue";
 import AddonTable from "./AddonTable.vue";
+import CharacterView from "./CharacterView.vue";
 
 const { t, locale } = useI18n();
 
@@ -18,45 +26,56 @@ function onLanguageChange(event: Event) {
   setLocale((event.target as HTMLSelectElement).value as Locale);
 }
 
-const managed = ref<WowRoot | null>(null);
-const suggestions = ref<WowRoot[]>([]);
-const wowScanned = ref(false);
+/** Aktive Ansicht: "wow", "addons" oder der Pfad einer AddOns.txt. */
+const view = ref("wow");
+
+const detection = ref<Detection | null>(null);
 const wowError = ref("");
 const exeInfo = ref<Record<string, WowExeInfo>>({});
 const relocateMsg = ref("");
+const clientState = ref<ClientState>("not-running");
 
 const addonScan = ref<AddonScan | null>(null);
 const addonError = ref("");
 const addonBusy = ref(false);
 const scanProgress = ref<ScanProgress | null>(null);
 const characters = ref<Character[]>([]);
-const character = ref<string | null>(null);
 let unlistenProgress: UnlistenFn | undefined;
+let clientTimer: ReturnType<typeof setInterval> | undefined;
+
+const managed = computed(() => detection.value?.managed ?? null);
 
 /** Interface-Version des Clients — Bezugswert für die Veraltet-Erkennung. */
 const clientInterface = computed(
   () => (managed.value && exeInfo.value[managed.value.path]?.interface_version) || null,
 );
 
+const health = computed(() =>
+  installationHealth(
+    managed.value,
+    managed.value ? exeInfo.value[managed.value.path] : null,
+    clientState.value,
+  ),
+);
+
+const activeCharacter = computed(
+  () => characters.value.find((character) => character.path === view.value) ?? null,
+);
+
 async function detectWow() {
   wowError.value = "";
-  wowScanned.value = false;
+  detection.value = null;
   relocateMsg.value = "";
   exeInfo.value = {};
   try {
-    const detection = await invoke<Detection>("detect_command");
-    managed.value = detection.managed;
-    suggestions.value = detection.suggestions;
-    wowScanned.value = true;
-    const roots = [detection.managed, ...detection.suggestions].filter(
-      (r): r is WowRoot => r !== null,
-    );
+    const result = await invoke<Detection>("detect_command");
+    const roots = [result.managed, ...result.suggestions].filter((r): r is WowRoot => r !== null);
     await Promise.all(roots.map((r) => inspectExe(r.path)));
-    // Gescannt wird nur die verwaltete Installation — Vorschläge sind Ziele
-    // zum Hinverschieben, nicht verwaltete Bestände.
-    if (detection.managed) {
-      await loadCharacters(detection.managed.path);
-      await scanAddons(detection.managed.path);
+    detection.value = result;
+    if (result.managed) {
+      await refreshClientState(result.managed.path);
+      await loadCharacters(result.managed.path);
+      await scanAddons(result.managed.path);
     }
   } catch (err) {
     wowError.value = t("wow.searchFailed", { err: String(err) });
@@ -72,9 +91,17 @@ async function inspectExe(root: string) {
 }
 
 /**
- * Charaktere für die Aktiv-Status-Auswahl. Ein fehlender WTF-Ordner ist kein
- * Fehler, deshalb liefert das Backend hier schlicht eine leere Liste.
+ * Der Client kann jederzeit gestartet oder beendet werden, während die App
+ * offen ist — deshalb periodisch statt einmalig.
  */
+async function refreshClientState(root: string) {
+  try {
+    clientState.value = await invoke<ClientState>("client_state_command", { root });
+  } catch {
+    clientState.value = "not-running";
+  }
+}
+
 async function loadCharacters(root: string) {
   try {
     characters.value = await invoke<Character[]>("list_characters_command", { root });
@@ -88,10 +115,7 @@ async function scanAddons(root: string) {
   addonError.value = "";
   scanProgress.value = null;
   try {
-    addonScan.value = await invoke<AddonScan>("scan_addons_command", {
-      root,
-      character: character.value,
-    });
+    addonScan.value = await invoke<AddonScan>("scan_addons_command", { root });
   } catch (err) {
     addonScan.value = null;
     addonError.value = t("addons.scanFailed", { err: String(err) });
@@ -99,11 +123,6 @@ async function scanAddons(root: string) {
     addonBusy.value = false;
     scanProgress.value = null;
   }
-}
-
-/** Charakterwechsel: nur der Aktiv-Zustand ändert sich, die Hashes liefert der Cache. */
-async function onCharacterChange() {
-  if (managed.value) await scanAddons(managed.value.path);
 }
 
 async function relocateInto(targetRoot: string) {
@@ -121,6 +140,8 @@ type Status = "idle" | "available" | "downloading" | "ready" | "error";
 
 // Intervall des automatischen Hintergrund-Checks (Start + alle 24 h).
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+// Der laufende Client wechselt oft und wird deshalb deutlich häufiger geprüft.
+const CLIENT_CHECK_INTERVAL_MS = 5000;
 
 const version = ref("");
 const status = ref<Status>("idle");
@@ -148,11 +169,15 @@ onMounted(async () => {
   }
   void checkForUpdate();
   updateTimer = setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL_MS);
+  clientTimer = setInterval(() => {
+    if (managed.value) void refreshClientState(managed.value.path);
+  }, CLIENT_CHECK_INTERVAL_MS);
   await detectWow();
 });
 
 onUnmounted(() => {
   if (updateTimer) clearInterval(updateTimer);
+  if (clientTimer) clearInterval(clientTimer);
   unlistenProgress?.();
 });
 
@@ -174,6 +199,9 @@ async function checkForUpdate() {
 async function installUpdate() {
   if (!pendingUpdate.value) return;
   status.value = "downloading";
+  // Ohne diese Zeile stünde im Banner weiter „Version X verfügbar", während
+  // schon geladen wird — der frühere separate Block hatte den Text selbst.
+  message.value = t("update.downloading");
   progress.value = { downloaded: 0, total: null };
   try {
     await pendingUpdate.value.downloadAndInstall((event) => {
@@ -198,127 +226,117 @@ async function restartNow() {
 </script>
 
 <template>
-  <main class="relative z-[1] mx-auto max-w-5xl px-6 py-[5vh]">
-    <label class="absolute top-[5vh] right-6 text-sm">
-      <span class="sr-only">{{ t("language") }}</span>
-      <select
-        :value="locale"
-        aria-label="language"
-        class="tome-input text-xs"
-        @change="onLanguageChange"
-      >
-        <option v-for="l in SUPPORTED_LOCALES" :key="l" :value="l">{{ l.toUpperCase() }}</option>
-      </select>
-    </label>
-
-    <header class="text-center">
-      <h1 class="text-4xl text-gold-700 dark:text-gold-300">Tome of Addons</h1>
-      <p class="mt-1 italic opacity-70">{{ t("tagline") }}</p>
-      <p data-testid="version" class="tome-data mt-1 opacity-50">v{{ version || "…" }}</p>
+  <main class="relative z-[1] mx-auto max-w-6xl px-6 py-[4vh]">
+    <header class="mb-6 flex items-end gap-4">
+      <div>
+        <h1 class="text-3xl text-gold-700 dark:text-gold-300">Tome of Addons</h1>
+        <p class="text-sm italic opacity-70">{{ t("tagline") }}</p>
+      </div>
+      <p data-testid="version" class="tome-data mb-1 opacity-50">v{{ version || "…" }}</p>
+      <label class="ml-auto text-sm">
+        <span class="sr-only">{{ t("language") }}</span>
+        <select
+          :value="locale"
+          aria-label="language"
+          class="tome-input text-xs"
+          @change="onLanguageChange"
+        >
+          <option v-for="l in SUPPORTED_LOCALES" :key="l" :value="l">{{ l.toUpperCase() }}</option>
+        </select>
+      </label>
     </header>
 
-    <section class="mx-auto mt-8 max-w-2xl text-left">
-      <p v-if="wowError" class="text-verdict-bad dark:text-verdict-bad-dark my-4">{{ wowError }}</p>
-
-      <!-- Ohne diese Zeile bliebe der Bereich während der Erkennung leer und
-           die App wirkte eingefroren. -->
-      <p v-else-if="!wowScanned" class="my-4 animate-pulse opacity-60">
-        {{ t("wow.searching") }}
+    <!-- Der Update-Banner steht über allem, damit er in jeder Ansicht sichtbar
+         bleibt statt an eine davon gebunden zu sein. -->
+    <div v-if="message" class="tome-panel mb-6 flex flex-wrap items-center gap-4 p-4">
+      <p>{{ message }}</p>
+      <p v-if="status === 'downloading'" class="tome-data opacity-70">
+        {{ fmtBytes(progress.downloaded)
+        }}<span v-if="progress.total"> / {{ fmtBytes(progress.total) }}</span>
       </p>
-
-      <template v-else>
-        <!-- Zustand 1: verankert — diese Installation wird verwaltet. -->
-        <div v-if="managed">
-          <p class="tome-heading mb-2">{{ t("wow.managed") }}</p>
-          <RootCard :root="managed" :exe="exeInfo[managed.path]" />
-
-          <div v-if="suggestions.length" class="mt-6 border-t border-dashed border-gold-700/40 pt-4">
-            <p class="tome-heading mb-2">{{ t("wow.others") }}</p>
-            <p class="mb-3 text-sm opacity-60">{{ t("wow.moveHint") }}</p>
-            <div v-for="s in suggestions" :key="s.path" class="mb-4">
-              <RootCard :root="s" :exe="exeInfo[s.path]" />
-              <button type="button" class="tome-button" @click="relocateInto(s.path)">
-                {{ t("wow.moveHere") }}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Zustand 2: nicht verankert, aber Installationen erkannt. -->
-        <div v-else-if="suggestions.length">
-          <p class="text-verdict-warn dark:text-verdict-warn-dark my-4">{{ t("wow.unanchored") }}</p>
-          <div v-for="s in suggestions" :key="s.path" class="mb-4">
-            <RootCard :root="s" :exe="exeInfo[s.path]" />
-            <button type="button" class="tome-button" @click="relocateInto(s.path)">
-              {{ t("wow.moveHere") }}
-            </button>
-          </div>
-        </div>
-
-        <!-- Zustand 3: nichts gefunden. -->
-        <p v-else class="my-4">{{ t("wow.none") }}</p>
-
-        <p v-if="relocateMsg" class="my-4">{{ relocateMsg }}</p>
-      </template>
-    </section>
-
-    <div v-if="addonBusy" class="tome-panel mt-8 p-5">
-      <p class="tome-heading mb-3">{{ t("addons.title") }}</p>
-      <p class="mb-2 text-sm opacity-70">
-        {{
-          scanProgress
-            ? t("addons.scanProgress", { done: scanProgress.done, total: scanProgress.total })
-            : t("addons.scanning")
-        }}
-        <span v-if="scanProgress" class="tome-data ml-2 opacity-60">{{
-          scanProgress.current
-        }}</span>
-      </p>
-      <div
-        class="h-2 w-full overflow-hidden rounded-sm border border-gold-700/40 bg-gold-500/10"
-        role="progressbar"
-        :aria-valuenow="scanProgress?.done ?? 0"
-        :aria-valuemin="0"
-        :aria-valuemax="scanProgress?.total ?? 0"
+      <button
+        v-if="status === 'available'"
+        type="button"
+        class="tome-button ml-auto"
+        @click="installUpdate"
       >
-        <div
-          class="h-full bg-gold-500/70 transition-[width] duration-150"
-          :style="{ width: scanProgress ? `${(scanProgress.done / scanProgress.total) * 100}%` : '0%' }"
-        />
-      </div>
-    </div>
-    <p v-else-if="addonError" class="text-verdict-bad dark:text-verdict-bad-dark mt-6 text-center">
-      {{ addonError }}
-    </p>
-    <AddonTable
-      v-else-if="addonScan"
-      v-model:character="character"
-      :scan="addonScan"
-      :characters="characters"
-      :client-interface="clientInterface"
-      @update:character="onCharacterChange"
-    />
-
-    <p v-if="message" class="my-4 text-center">{{ message }}</p>
-
-    <div v-if="status === 'available'" class="tome-panel mx-auto mt-6 max-w-md p-4 text-center">
-      <button type="button" class="tome-button" @click="installUpdate">
         {{ t("update.download") }}
       </button>
-    </div>
-
-    <div v-if="status === 'downloading'" class="tome-panel mx-auto mt-6 max-w-md p-4 text-center">
-      <p>
-        {{ t("update.downloading") }}
-        {{ fmtBytes(progress.downloaded) }}
-        <span v-if="progress.total"> / {{ fmtBytes(progress.total) }}</span>
-      </p>
-    </div>
-
-    <div v-if="status === 'ready'" class="tome-panel mx-auto mt-6 max-w-md p-4 text-center">
-      <button type="button" class="tome-button" @click="restartNow">
+      <button v-if="status === 'ready'" type="button" class="tome-button ml-auto" @click="restartNow">
         {{ t("update.restart") }}
       </button>
+    </div>
+
+    <div class="flex gap-6">
+      <SideBar
+        :health="health"
+        :addons="addonScan?.addons ?? []"
+        :characters="characters"
+        :view="view"
+        @select="view = $event"
+      />
+
+      <div class="tome-panel min-w-0 flex-1 p-5">
+        <WowView
+          v-if="view === 'wow'"
+          :detection="detection"
+          :exe-info="exeInfo"
+          :health="health"
+          :error="wowError"
+          :relocate-message="relocateMsg"
+          @relocate="relocateInto"
+        />
+
+        <template v-else>
+          <div v-if="addonBusy">
+            <p class="tome-heading mb-3">{{ t("addons.title") }}</p>
+            <p class="mb-2 text-sm opacity-70">
+              {{
+                scanProgress
+                  ? t("addons.scanProgress", {
+                      done: scanProgress.done,
+                      total: scanProgress.total,
+                    })
+                  : t("addons.scanning")
+              }}
+              <span v-if="scanProgress" class="tome-data ml-2 opacity-60">{{
+                scanProgress.current
+              }}</span>
+            </p>
+            <div
+              class="h-2 w-full overflow-hidden rounded-sm border border-gold-700/40 bg-gold-500/10"
+              role="progressbar"
+              :aria-valuenow="scanProgress?.done ?? 0"
+              :aria-valuemin="0"
+              :aria-valuemax="scanProgress?.total ?? 0"
+            >
+              <div
+                class="h-full bg-gold-500/70 transition-[width] duration-150"
+                :style="{
+                  width: scanProgress ? `${(scanProgress.done / scanProgress.total) * 100}%` : '0%',
+                }"
+              />
+            </div>
+          </div>
+
+          <p v-else-if="addonError" class="text-verdict-bad dark:text-verdict-bad-dark">
+            {{ addonError }}
+          </p>
+
+          <CharacterView
+            v-else-if="addonScan && activeCharacter"
+            :key="activeCharacter.path"
+            :character="activeCharacter"
+            :scan="addonScan"
+            :client-interface="clientInterface"
+          />
+
+          <section v-else-if="addonScan">
+            <h2 class="tome-heading mb-4">{{ t("addons.title") }}</h2>
+            <AddonTable key="addons" :scan="addonScan" :client-interface="clientInterface" />
+          </section>
+        </template>
+      </div>
     </div>
   </main>
 </template>

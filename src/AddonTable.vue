@@ -7,6 +7,7 @@ import {
   getExpandedRowModel,
   getSortedRowModel,
   useVueTable,
+  type ColumnDef,
   type ExpandedState,
   type SortingState,
 } from "@tanstack/vue-table";
@@ -17,6 +18,7 @@ import {
   interfaceStatus,
   matchesQuery,
   shortHash,
+  stateFor,
   type Addon,
   type AddonScan,
   type Character,
@@ -25,13 +27,23 @@ import { fmtBytes } from "./wow";
 
 const props = defineProps<{
   scan: AddonScan;
-  characters: Character[];
   /** Interface-Version des Clients, Bezugswert für die Veraltet-Erkennung. */
   clientInterface: string | null;
+  /**
+   * Charakter, dessen Aktiv-Zustand gezeigt wird. `null` in der reinen
+   * Addon-Ansicht — dort gibt es keinen Charakter-Bezug und damit auch keine
+   * Aktiv-Spalte, statt eine Spalte voller Striche zu zeigen.
+   */
+  character?: Character | null;
 }>();
-/** Pfad zur AddOns.txt des gewählten Charakters, `null` = keiner gewählt. */
-const character = defineModel<string | null>("character", { required: true });
 const { t } = useI18n();
+
+/**
+ * Spalten werden einmalig beim Aufbau festgelegt, nicht reaktiv: die Ansicht
+ * wird beim Wechsel ohnehin neu aufgebaut (`:key`), und eine wechselnde
+ * Spaltenzahl in einer laufenden Tabelle wäre eine Fehlerquelle ohne Nutzen.
+ */
+const withState = props.character != null;
 
 const query = ref("");
 const developerOnly = ref(false);
@@ -59,6 +71,17 @@ const rows = computed(() =>
 const outdatedCount = computed(() => countOutdated(props.scan.addons, props.clientInterface));
 
 const columnHelper = createColumnHelper<Addon>();
+
+// Unbekannt sortiert zwischen aktiv und inaktiv, statt mit einem der beiden zu
+// verschmelzen — „nie gesehen" ist etwas anderes als „abgeschaltet".
+const stateColumn = columnHelper.accessor(
+  (addon) => {
+    const state = stateFor(props.character ?? null, addon);
+    return state === null ? 1 : state ? 2 : 0;
+  },
+  { id: "enabled" },
+);
+
 const columns = [
   columnHelper.accessor("title", {
     id: "title",
@@ -67,15 +90,11 @@ const columns = [
   columnHelper.accessor((addon) => addon.version ?? "", { id: "version" }),
   columnHelper.accessor((addon) => addon.interface ?? "", { id: "interface" }),
   columnHelper.accessor((addon) => addon.tree_sha_short ?? "", { id: "hash" }),
-  // Unbekannt sortiert zwischen aktiv und inaktiv, statt mit einem der beiden
-  // zu verschmelzen — „nie gesehen" ist etwas anderes als „abgeschaltet".
-  columnHelper.accessor((addon) => (addon.enabled === null ? 1 : addon.enabled ? 2 : 0), {
-    id: "enabled",
-  }),
+  ...(withState ? [stateColumn] : []),
   columnHelper.accessor("mode", { id: "mode" }),
   columnHelper.accessor("file_count", { id: "files" }),
   columnHelper.accessor("size_bytes", { id: "size" }),
-];
+] as ColumnDef<Addon, unknown>[];
 
 /** Spalten, deren Werte Zahlen sind, werden rechtsbündig gesetzt. */
 const NUMERIC = new Set(["files", "size"]);
@@ -123,9 +142,7 @@ async function copyHash(addon: Addon) {
 </script>
 
 <template>
-  <section class="tome-panel mt-8 p-5">
-    <h2 class="tome-heading mb-4">{{ t("addons.title") }}</h2>
-
+  <section>
     <div class="mb-4 flex flex-wrap items-center gap-4">
       <input
         v-model="query"
@@ -134,15 +151,6 @@ async function copyHash(addon: Addon) {
         :placeholder="t('addons.search')"
         :aria-label="t('addons.search')"
       />
-      <label v-if="props.characters.length" class="flex items-center gap-2 text-sm">
-        <span class="opacity-70">{{ t("addons.character") }}</span>
-        <select v-model="character" class="tome-input text-sm">
-          <option :value="null">{{ t("addons.noCharacter") }}</option>
-          <option v-for="c in props.characters" :key="c.path" :value="c.path">
-            {{ c.label }}
-          </option>
-        </select>
-      </label>
       <label class="flex cursor-pointer items-center gap-2 text-sm">
         <input v-model="developerOnly" type="checkbox" class="accent-gold-700" />
         {{ t("addons.developerOnly") }}
@@ -257,23 +265,18 @@ async function copyHash(addon: Addon) {
                 <span v-else class="tome-data opacity-50">—</span>
               </td>
               <td class="tome-data py-1.5 pr-3">{{ shortHash(row.original) }}</td>
-              <td class="py-1.5 pr-3">
+              <td v-if="withState" class="py-1.5 pr-3">
                 <span
-                  v-if="row.original.enabled === true"
+                  v-if="stateFor(props.character ?? null, row.original) === true"
                   class="tome-badge text-verdict-ok dark:text-verdict-ok-dark"
                   >{{ t("addons.enabled") }}</span
                 >
                 <span
-                  v-else-if="row.original.enabled === false"
+                  v-else-if="stateFor(props.character ?? null, row.original) === false"
                   class="tome-badge opacity-50"
                   >{{ t("addons.disabled") }}</span
                 >
-                <span
-                  v-else
-                  class="tome-data opacity-40"
-                  :title="t('addons.unseenTitle')"
-                  >—</span
-                >
+                <span v-else class="tome-data opacity-40" :title="t('addons.unseenTitle')">—</span>
               </td>
               <td class="py-1.5 pr-3">
                 <!-- Nur die Ausnahme benennen: „Git-Checkout". Ob die übrigen
@@ -292,7 +295,7 @@ async function copyHash(addon: Addon) {
             </tr>
 
             <tr v-if="row.getIsExpanded()" class="border-b border-ink-500/15">
-              <td colspan="8" class="bg-gold-500/5 px-6 py-3">
+              <td :colspan="withState ? 8 : 7" class="bg-gold-500/5 px-6 py-3">
                 <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
                   <dt class="opacity-60">{{ t("addons.detail.author") }}</dt>
                   <dd>{{ row.original.author ?? "—" }}</dd>
@@ -344,7 +347,7 @@ async function copyHash(addon: Addon) {
           </template>
 
           <tr v-if="rows.length === 0">
-            <td colspan="8" class="py-6 text-center opacity-70">{{ t("addons.empty") }}</td>
+            <td :colspan="withState ? 8 : 7" class="py-6 text-center opacity-70">{{ t("addons.empty") }}</td>
           </tr>
         </tbody>
       </table>

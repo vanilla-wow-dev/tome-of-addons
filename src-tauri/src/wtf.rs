@@ -13,7 +13,7 @@
 //! Es wird nur gelesen, nie geschrieben. Ein kaputter oder unlesbarer
 //! `WTF`-Ordner darf den Addon-Scan nicht verhindern.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -31,6 +31,12 @@ pub struct Character {
     /// Als Feld und nicht als Methode, damit die Schreibweise einmal hier
     /// festgelegt ist und nicht im Frontend nachgebaut werden muss.
     pub label: String,
+    /// Addon-Zustände dieses Charakters, Schlüssel kleingeschrieben.
+    ///
+    /// Wird gleich mitgelesen, statt sie einzeln nachzuladen: die Seitenleiste
+    /// zeigt pro Charakter eine Zahl und braucht dafür ohnehin alle. Es sind
+    /// wenige Zeilen Text pro Datei. `BTreeMap` für stabile Serialisierung.
+    pub states: BTreeMap<String, bool>,
 }
 
 /// Listet alle Charaktere mit einer `AddOns.txt` unterhalb eines WoW-Roots.
@@ -57,12 +63,16 @@ pub fn list_characters(root: &Path) -> Vec<Character> {
                     continue;
                 }
                 let name = file_name(&character);
+                // Unlesbare Datei bedeutet „keine Zustände bekannt", nicht
+                // „Charakter existiert nicht".
+                let states = read_states(&file).unwrap_or_default().into_iter().collect();
                 found.push(Character {
                     label: format!("{name} · {realm_name} ({account_name})"),
                     account: account_name.clone(),
                     realm: realm_name.clone(),
                     name,
                     path: file.to_string_lossy().into_owned(),
+                    states,
                 });
             }
         }
@@ -205,6 +215,10 @@ mod tests {
         assert_eq!(chars[1].realm, "NostalGeek 1.12");
         assert!(chars[1].path.ends_with("AddOns.txt"));
         assert_eq!(chars[1].label, "Haensel · NostalGeek 1.12 (RYLON8)");
+        // Die Zustände kommen gleich mit — die Seitenleiste braucht sie für
+        // alle Charaktere, nicht nur für den gewählten.
+        assert_eq!(chars[1].states.get("pfquest"), Some(&false));
+        assert_eq!(chars[2].states.get("pfquest"), Some(&true));
     }
 
     #[test]
@@ -299,9 +313,11 @@ mod tests {
             name: "C".into(),
             path: "/x/AddOns.txt".into(),
             label: "C · R (A)".into(),
+            states: BTreeMap::from([("pfquest".to_string(), true)]),
         };
         let json = serde_json::to_string(&character).unwrap();
         assert!(json.contains("\"name\":\"C\""));
+        assert!(json.contains("\"states\":{\"pfquest\":true}"));
         assert_eq!(character.clone(), character);
         assert!(format!("{character:?}").contains("Character"));
     }
