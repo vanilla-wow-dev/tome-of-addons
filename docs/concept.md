@@ -989,6 +989,8 @@ Identitäts-Anker ist der teuerste denkbare Bug in diesem System.
 | E-8 | Tree-Hasher als gemeinsame Crate für Client und Collector | Zwei Implementierungen desselben Normalisierungs-Regelwerks würden divergieren; eine Divergenz im Identitäts-Anker wäre der teuerste denkbare Bug. |
 | E-9 | Einzelnes `CR` wird **nicht** zu `LF` normalisiert (Korrektur zur ersten Fassung) | Nur CRLF entsteht durch OS-Checkout-Filter. Ein alleinstehendes CR ist echter Datei-Inhalt (z. B. in einem Lua-String-Literal) — es umzuschreiben würde Inhalt verfälschen und wäre für die OS-Unabhängigkeit ohne Nutzen. Entspricht auch Gits eigenem `text=auto`-Verhalten. |
 | E-10 | Die Git-Serialisierung wird gegen echtes `git write-tree` kreuzvalidiert, indem im Test SHA-256 gegen SHA-1 getauscht wird | Golden Vectors, die man aus der eigenen Implementierung gewinnt, beweisen nichts. Der Digest-generische Kern erlaubt einen echten externen Abgleich von Objektformat und Sortierregel. |
+| E-11 | Maßgeblich ist ausschließlich `<Ordnername>.toc` (case-insensitiv) | Neun Addons im Bestand liefern eine zweite Manifest-Datei (`pfQuest-tbc.toc`, `ShaguTweaks-tbc.toc`, `CallToArms-master.toc`). Der Client lädt nur die namensgleiche. Messbarer Beleg: über *alle* `.toc` gerechnet erscheinen Interface-Werte 20200/20400 (TBC), über die maßgeblichen nur 11000/11100/11200 — ohne die Regel würden Vanilla-Addons als TBC-Addons gelten. |
+| E-12 | `.toc`-Parsing schlägt nie fehl; Encoding wird lossy dekodiert | Ein `.toc` liefert reine Anzeige-Metadaten, der Identitäts-Anker ist der Tree-Hash. Ein kaputtes Byte in einem Notes-Feld darf ein Addon nicht unsichtbar machen. 1.12-Clients schrieben in der Locale-Kodierung, Latin-1/GBK ist also jederzeit möglich. |
 
 ---
 
@@ -1029,8 +1031,10 @@ MVP-0 fertigstellen, in dieser Reihenfolge:
    Function-Coverage, eigener CI-Job auf Ubuntu und Windows. Die Serialisierung
    ist gegen echtes `git write-tree` kreuzvalidiert (siehe E-10). Verifiziert
    gegen den realen Bestand: 259 Ordner, 0 Fehler, deterministisch.
-2. **`toc.rs`** — `.toc`-Parser, gehärtet gegen einen realen Bestand von 260
-   Addons statt gegen synthetische Fixtures.
+2. ~~**`toc.rs`** — `.toc`-Parser.~~ ✅ Umgesetzt als `crates/toc` (`toa-toc`).
+   24 Tests, 100 % Line- und Function-Coverage. Regeln aus einer Erhebung über
+   266 reale `.toc`-Dateien abgeleitet (siehe E-11); verifiziert gegen alle 258
+   Ordner ohne False Negatives.
 3. **`addons.rs`** — Walk über `Interface/AddOns/`, Mode-Detection, Hash-Cache,
    `rayon`-Parallelisierung.
 4. **UI-Fundament** — Tailwind + TanStack Table einziehen, bestehende Views

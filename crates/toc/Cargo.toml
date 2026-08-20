@@ -1,0 +1,9 @@
+[package]
+name = "toa-toc"
+version = "0.1.0"
+edition = "2021"
+description = "Parser for WoW 1.12.1 addon .toc manifests"
+authors = ["Ulf Gebhardt"]
+license = "MIT"
+
+[dependencies]

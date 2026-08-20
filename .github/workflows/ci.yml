@@ -33,19 +33,19 @@ jobs:
       - name: Test + Coverage-Gate (Vitest)
         run: npm run coverage
 
-  # Der Tree-Hasher ist der Identitäts-Anker des gesamten Systems und hat keine
-  # Tauri-Abhängigkeit — daher ein eigener, schneller Job ohne WebKit-Setup.
-  # Windows ist zwingend: dort greifen die #[cfg(unix)]-Tests nicht, und der
-  # Rest muss trotzdem kompilieren und bestehen.
-  tree-hash:
+  # Die Crates unter crates/ haben keine Tauri-Abhängigkeit — daher ein eigener,
+  # schneller Job ohne WebKit-Setup. Windows ist zwingend: dort greifen die
+  # #[cfg(unix)]-Tests nicht, und der Rest muss trotzdem kompilieren und bestehen.
+  crates:
     strategy:
       fail-fast: false
       matrix:
+        crate: [tree-hash, toc]
         platform: [ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.platform }}
     defaults:
       run:
-        working-directory: crates/tree-hash
+        working-directory: crates/${{ matrix.crate }}
     steps:
       - uses: actions/checkout@v4
 
@@ -63,7 +63,7 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./crates/tree-hash -> target"
+          workspaces: "./crates/${{ matrix.crate }} -> target"
 
       - name: Format check
         if: matrix.platform == 'ubuntu-22.04'
@@ -73,11 +73,12 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: cargo clippy --all-targets -- -D warnings
 
-      # Die Kreuzvalidierung gegen `git write-tree` braucht ein sauberes
-      # Git-Environment: eine globale core.autocrlf-Einstellung des Runners
-      # würde den Vergleich verfälschen. Auf Windows-Runnern ist autocrlf=true
-      # der Default, daher explizit abschalten.
+      # Die Kreuzvalidierung des Tree-Hashers gegen `git write-tree` braucht ein
+      # sauberes Git-Environment: eine globale core.autocrlf-Einstellung des
+      # Runners würde den Vergleich verfälschen. Auf Windows-Runnern ist
+      # autocrlf=true der Default, daher explizit abschalten.
       - name: Neutralize global git config
+        if: matrix.crate == 'tree-hash'
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
