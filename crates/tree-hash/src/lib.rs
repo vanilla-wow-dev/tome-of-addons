@@ -562,6 +562,13 @@ mod tests {
 
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+    /// A path that is guaranteed not to exist. Unlike an absolute path such as
+    /// `/definitely/not/here`, this cannot be resolved drive-relative on
+    /// Windows and accidentally match something real.
+    fn nonexistent(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("toa-nonexistent-{}-{label}", std::process::id()))
+    }
+
     /// Throwaway directory tree. Unique without needing a clock or RNG.
     struct TempTree {
         root: PathBuf,
@@ -789,7 +796,7 @@ mod tests {
 
     #[test]
     fn missing_root_is_an_io_error() {
-        let err = hash_tree(Path::new("/definitely/not/here")).unwrap_err();
+        let err = hash_tree(&nonexistent("hash")).unwrap_err();
         assert!(matches!(err, HashError::Io { .. }));
         assert!(std::error::Error::source(&err).is_some());
     }
@@ -1110,7 +1117,7 @@ mod tests {
     #[test]
     fn fingerprint_reports_io_errors() {
         assert!(matches!(
-            fingerprint(Path::new("/definitely/not/here")).unwrap_err(),
+            fingerprint(&nonexistent("fingerprint")).unwrap_err(),
             HashError::Io { .. }
         ));
     }

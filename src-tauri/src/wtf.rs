@@ -284,7 +284,11 @@ mod tests {
 
     #[test]
     fn fehlende_datei_meldet_io_fehler() {
-        assert!(read_states(Path::new("/definitiv/kein/pfad")).is_err());
+        // Unter dem Temp-Verzeichnis statt "/kein/pfad": Letzteres ist unter
+        // Windows laufwerksrelativ und könnte tatsächlich existieren.
+        let missing =
+            std::env::temp_dir().join(format!("toa-nonexistent-{}-wtf", std::process::id()));
+        assert!(read_states(&missing).is_err());
     }
 
     #[test]

@@ -527,8 +527,12 @@ init\\enUS.xml
 
     #[test]
     fn missing_folder_surfaces_the_io_error() {
-        assert!(find_toc(Path::new("/definitely/not/here")).is_err());
-        assert!(load(Path::new("/definitely/not/here")).is_err());
+        // Below the temp dir rather than `/definitely/not/here`: on Windows the
+        // latter resolves drive-relative and could actually exist.
+        let missing =
+            std::env::temp_dir().join(format!("toa-nonexistent-{}-toc", std::process::id()));
+        assert!(find_toc(&missing).is_err());
+        assert!(load(&missing).is_err());
     }
 
     #[test]

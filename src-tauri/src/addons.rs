@@ -353,6 +353,13 @@ mod tests {
         scan_with(dir, cache, &HashMap::new(), &|_, _, _| {})
     }
 
+    /// Pfad, den es garantiert nicht gibt — und der, anders als ein
+    /// Absolutpfad wie `/kein/pfad`, unter Windows nicht laufwerksrelativ
+    /// aufgelöst und dabei versehentlich angelegt werden kann.
+    fn nonexistent(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("toa-nonexistent-{}-{label}", std::process::id()))
+    }
+
     fn find<'a>(scan: &'a Scan, id: &str) -> &'a Addon {
         // `expect` statt `unwrap_or_else(|| panic!(…))`: letzteres erzeugt eine
         // Closure, die bei grünen Tests nie läuft und das 100-%-Gate reißt.
@@ -564,7 +571,7 @@ mod tests {
     #[test]
     fn fehlendes_addons_verzeichnis_ist_ein_io_fehler() {
         let mut cache = HashCache::default();
-        assert!(scan(Path::new("/definitiv/kein/pfad"), &mut cache).is_err());
+        assert!(scan(&nonexistent("scan"), &mut cache).is_err());
     }
 
     // ------------------------------------------------------- Fehlerbehandlung
@@ -745,12 +752,21 @@ mod tests {
 
     #[test]
     fn speichern_meldet_io_fehler() {
+        // Ziel unterhalb einer *Datei*: das Anlegen des Elternverzeichnisses
+        // muss scheitern. Ein Absolutpfad wie "/kein/pfad" taugt dafür nicht —
+        // Windows löst ihn laufwerksrelativ auf, legt ihn an, und der Test
+        // hinterließe obendrein Verzeichnisse, auf deren Fehlen andere Tests
+        // bauen.
+        let tree = TempAddons::new("cache-io-error");
+        let blocker = tree.path().join("blocker");
+        fs::write(&blocker, b"x").unwrap();
         assert!(HashCache::default()
-            .save(Path::new("/definitiv/kein/pfad/c.json"))
+            .save(&blocker.join("sub").join("c.json"))
             .is_err());
-        // Pfad ohne Elternverzeichnis — der mkdir-Zweig entfällt, das Schreiben
-        // scheitert trotzdem.
-        assert!(HashCache::default().save(Path::new("/")).is_err());
+
+        // Leerer Pfad: `parent()` ist `None`, der mkdir-Zweig entfällt, das
+        // Schreiben scheitert trotzdem — auf beiden Plattformen.
+        assert!(HashCache::default().save(Path::new("")).is_err());
     }
 
     // --------------------------------------------------------- Serialisierung
