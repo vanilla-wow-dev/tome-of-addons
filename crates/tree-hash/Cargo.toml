@@ -1,0 +1,17 @@
+[package]
+name = "toa-tree-hash"
+version = "0.1.0"
+edition = "2021"
+description = "toa-tree-v1: canonical, OS-independent content hash for WoW addon folders"
+authors = ["Ulf Gebhardt"]
+license = "MIT"
+
+[dependencies]
+digest = "0.10"
+sha2 = "0.10"
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+# Only for the cross-check against real `git write-tree`, which is SHA-1 based.
+# Never used by the public API.
+sha1 = "0.10"

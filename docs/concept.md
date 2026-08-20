@@ -288,7 +288,7 @@ und damit wäre der gesamte Index wertlos.
 
 | Achse | Divergenz zwischen Betriebssystemen | Regel |
 | --- | --- | --- |
-| Zeilenenden | Windows-Checkout expandiert LF → CRLF | Text-Dateien: CRLF und einzelnes CR → **LF**, dann hashen. Binär-Erkennung wie Git: NUL-Byte in den ersten 8000 Bytes ⇒ binär ⇒ Bytes roh |
+| Zeilenenden | Windows-Checkout expandiert LF → CRLF | Text-Dateien: **CRLF → LF**, dann hashen. Ein **einzelnes CR bleibt unangetastet** — kein OS-Filter erzeugt je eines, es ist also echter Inhalt; es umzuschreiben würde Dateien beschädigen, die legitim ein CR enthalten. Binär-Erkennung wie Git: NUL-Byte in den ersten 8000 Bytes ⇒ binär ⇒ Bytes roh |
 | Exec-Bit | Windows kennt keins (`100644` vs `100755`) | Mode **immer `100644`** |
 | Symlinks / Submodules | Semantik plattformabhängig, unter Wine unzuverlässig | Werden **nicht** gehasht — ihr Vorhandensein ist ein Fehler, kein still ignorierter Sonderfall |
 | Dateiname-Unicode | macOS liefert NFD, Linux/Windows NFC | Namen vor dem Hash auf **NFC** normalisieren |
@@ -333,28 +333,46 @@ etwas geändert hat.
 
 #### Performance
 
-Gemessen an einem realen Bestand (260 Addons, 10.364 Dateien, 435 MB) auf einem
-Intel i7-7820HQ (Kaby Lake, 2017) — **ohne** SHA-NI-Hardwarebeschleunigung, also
-der realistische Worst Case für die Zielgruppe:
+Gemessen an einem realen Bestand (259 Addon-Ordner, 10.364 Dateien, 434,6 MB,
+davon 192,5 MB in CRLF-Dateien) auf einem Intel i7-7820HQ (Kaby Lake, 2017) —
+**ohne** SHA-NI-Hardwarebeschleunigung, also der realistische Worst Case für die
+Zielgruppe. Warme Page-Cache, Release-Build, ein Thread:
 
-| Operation | Zeit |
+| Phase | Zeit |
 | --- | --- |
-| Voller Scan, SHA-256, 1 Thread | 1,46 s |
-| Voller Scan, SHA-256, alle Kerne | 0,48 s |
-| Voller Scan, SHA-1, 1 Thread (Vergleich) | 0,74 s |
 | Reiner Verzeichnis-Walk (nur `stat`) | 0,041 s |
+| Alle Dateien lesen | 0,253 s |
+| Lesen + CRLF-Scan | 0,339 s |
+| Lesen + SHA-256 (`sha2`-Crate) | 3,427 s |
+| **Vollständiger `hash_tree` über alle 259 Ordner** | **3,62 s** |
 
-SHA-256 kostet gegenüber SHA-1 also **0,7 Sekunden auf einem kompletten
-Kaltstart-Scan**. Der dominierende Faktor ist ohnehin nicht der Hash, sondern
-kaltes Disk-I/O beim allerersten Scan — und das trifft beide Algorithmen gleich.
-Im Regelfall greift der Hash-Cache und es bleibt beim 41-ms-Walk plus Rehash der
-wenigen geänderten Ordner.
+Die Aufschlüsselung ist eindeutig: Walk, Normalisierung und Serialisierung
+kosten zusammen rund 0,2 s. Alles andere ist die Hash-Funktion selbst. Die
+`sha2`-Crate erreicht hier 137 MB/s, OpenSSLs `sha256sum` 300 MB/s — Faktor 2,2,
+weil auf diesem Rechner der Software-Fallback greift. Auf CPUs mit SHA-NI
+(AMD Zen durchgängig, Intel ab Ice Lake) schaltet `sha2` über `cpufeatures`
+automatisch auf die Hardware-Instruktionen um.
+
+Das `asm`-Feature von `sha2` wurde gemessen und verworfen: auf x86_64 praktisch
+wirkungslos (3,72 s statt 3,62 s), würde aber eine C-Toolchain in jeden
+Cross-Build zwingen.
+
+Einordnung: 3,6 s einmalig auf dem schlechtestmöglichen Rechner, mit `rayon`
+über 8 Threads rund 1,2 s, und ab dem zweiten Start greift der Hash-Cache —
+dann bleibt der 41-ms-Walk plus Rehash der wenigen geänderten Ordner.
 
 Implementierungsauflagen:
-- Parallelisierung über `rayon` (Faktor ~3 gemessen).
-- CRLF→LF-Normalisierung **streamend** mit fixem Puffer, nicht per Slurp — im
-  Bestand liegen Einzeldateien von 80 MB. Ein CR an der Puffergrenze muss korrekt
-  behandelt werden.
+- Parallelisierung über `rayon` — gehört in den Addon-Walk (`addons.rs`), nicht
+  in den Hasher; die Crate bleibt bewusst single-threaded und damit trivial
+  testbar.
+- CRLF→LF-Normalisierung **run-weise**, nicht byteweise: eine Push-pro-Byte-
+  Schleife kostete auf dem Korpus messbar 3,4 s zusätzlich (6,99 s statt 3,62 s).
+- Dateien über 16 MB werden **streamend in zwei Durchläufen** gehasht statt in
+  den Speicher gelesen — im Bestand liegen Einzeldateien von 80 MB. Der erste
+  Durchlauf ermittelt die normalisierte Länge für den Objekt-Header, der zweite
+  füttert den Digest aus dem gerade gewärmten Page-Cache. Ein CR an der
+  Puffergrenze wird zurückgehalten, bis der nächste Chunk zeigt, ob ein CRLF
+  beginnt.
 - Binär-Erkennung liest die ersten 8000 Bytes, entscheidet, streamt dann weiter.
 
 ### Versions-Problem
@@ -969,6 +987,8 @@ Identitäts-Anker ist der teuerste denkbare Bug in diesem System.
 | E-6 | Hash-Cache-Key `(file_count, max_mtime, total_bytes)` | Der Walk liest die Größe ohnehin (41 ms für 10.364 Dateien); das Tripel fängt zusätzlich „geändert bei erhaltener mtime" ab. |
 | E-7 | Keine Git-Bibliothek für den Hash-Pfad | Der Hasher arbeitet direkt auf dem Dateisystem. Damit entfällt die Abwägung `git2` vs `gix` für die Identität und die C-Toolchain-Last im Cross-Build. |
 | E-8 | Tree-Hasher als gemeinsame Crate für Client und Collector | Zwei Implementierungen desselben Normalisierungs-Regelwerks würden divergieren; eine Divergenz im Identitäts-Anker wäre der teuerste denkbare Bug. |
+| E-9 | Einzelnes `CR` wird **nicht** zu `LF` normalisiert (Korrektur zur ersten Fassung) | Nur CRLF entsteht durch OS-Checkout-Filter. Ein alleinstehendes CR ist echter Datei-Inhalt (z. B. in einem Lua-String-Literal) — es umzuschreiben würde Inhalt verfälschen und wäre für die OS-Unabhängigkeit ohne Nutzen. Entspricht auch Gits eigenem `text=auto`-Verhalten. |
+| E-10 | Die Git-Serialisierung wird gegen echtes `git write-tree` kreuzvalidiert, indem im Test SHA-256 gegen SHA-1 getauscht wird | Golden Vectors, die man aus der eigenen Implementierung gewinnt, beweisen nichts. Der Digest-generische Kern erlaubt einen echten externen Abgleich von Objektformat und Sortierregel. |
 
 ---
 
@@ -1004,10 +1024,11 @@ Identitäts-Anker ist der teuerste denkbare Bug in diesem System.
 
 MVP-0 fertigstellen, in dieser Reihenfolge:
 
-1. **`hash.rs`** — kanonischer Tree-Hash `toa-tree-v1` als eigene Crate.
-   Golden Vectors, Kreuztest der Serialisierung gegen echtes `git write-tree` für
-   den LF-only-Fall, Property-Tests (CRLF ≡ LF, Exec-Bit ≡ kein Exec-Bit,
-   NFD ≡ NFC).
+1. ~~**`hash.rs`** — kanonischer Tree-Hash `toa-tree-v1` als eigene Crate.~~ ✅
+   Umgesetzt als `crates/tree-hash` (`toa-tree-hash`). 35 Tests, 100 % Line- und
+   Function-Coverage, eigener CI-Job auf Ubuntu und Windows. Die Serialisierung
+   ist gegen echtes `git write-tree` kreuzvalidiert (siehe E-10). Verifiziert
+   gegen den realen Bestand: 259 Ordner, 0 Fehler, deterministisch.
 2. **`toc.rs`** — `.toc`-Parser, gehärtet gegen einen realen Bestand von 260
    Addons statt gegen synthetische Fixtures.
 3. **`addons.rs`** — Walk über `Interface/AddOns/`, Mode-Detection, Hash-Cache,
