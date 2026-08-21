@@ -182,8 +182,6 @@
   position: relative;
   z-index: 1;
   border: 1px solid var(--color-gold-700);
-  outline: 1px solid color-mix(in srgb, var(--color-gold-500) 35%, transparent);
-  outline-offset: 3px;
   background: var(--panel-bg);
   box-shadow:
     0 1px 0 color-mix(in srgb, white 55%, transparent) inset,
@@ -192,6 +190,56 @@
 
   @media (prefers-color-scheme: dark) {
     border-color: var(--color-gold-700);
+  }
+}
+
+/* Verschachtelter Block. Bewusst *kein* zweiter Rahmen: ein Panel im Panel
+   ergibt eine doppelte Goldlinie, die nur unruhig wirkt. Stattdessen ein
+   getönter Grund mit einer Kante links. */
+@utility tome-inset {
+  position: relative;
+  border-left: 2px solid color-mix(in srgb, var(--color-gold-700) 55%, transparent);
+  background: color-mix(in srgb, var(--color-gold-700) 6%, transparent);
+  border-radius: 0 2px 2px 0;
+}
+
+/* Scrollbereiche.
+
+   Der Balken wird ausdrücklich sichtbar gestaltet und die Spur *immer*
+   gezeichnet: erst dadurch ist erkennbar, dass ein Bereich überhaupt blättert.
+   `scrollbar-gutter: stable` reserviert den Platz, sonst legt sich der Balken
+   über die letzte Spalte. */
+@utility tome-scroll {
+  overflow: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-gold-500)
+    color-mix(in srgb, var(--color-gold-700) 15%, transparent);
+
+  &::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: color-mix(in srgb, var(--color-gold-700) 12%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-gold-700) 30%, transparent);
+    border-radius: 2px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: color-mix(in srgb, var(--color-gold-500) 80%, transparent);
+    background-clip: content-box;
+    border: 2px solid transparent;
+    border-radius: 6px;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-gold-500);
+  }
+
+  &::-webkit-scrollbar-corner {
+    background: transparent;
   }
 }
 

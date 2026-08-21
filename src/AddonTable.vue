@@ -48,7 +48,19 @@ const withState = props.character != null;
 const query = ref("");
 const developerOnly = ref(false);
 const outdatedOnly = ref(false);
-const sorting = ref<SortingState>([{ id: "title", desc: false }]);
+/**
+ * Beim Charakter gibt der Aktiv-Zustand die Reihenfolge vor: aktiv zuerst,
+ * innerhalb dessen alphabetisch. Das beantwortet die eigentliche Frage der
+ * Ansicht („was lädt dieser Charakter?") ohne einen einzigen Klick.
+ */
+const sorting = ref<SortingState>(
+  props.character
+    ? [
+        { id: "enabled", desc: true },
+        { id: "title", desc: false },
+      ]
+    : [{ id: "title", desc: false }],
+);
 const expanded = ref<ExpandedState>({});
 const showSkipped = ref(false);
 const copied = ref<string | null>(null);
@@ -82,19 +94,37 @@ const stateColumn = columnHelper.accessor(
   { id: "enabled" },
 );
 
-const columns = [
-  columnHelper.accessor("title", {
-    id: "title",
-    sortingFn: (a, b) => compareTitles(a.original, b.original),
-  }),
-  columnHelper.accessor((addon) => addon.version ?? "", { id: "version" }),
-  columnHelper.accessor((addon) => addon.interface ?? "", { id: "interface" }),
-  columnHelper.accessor((addon) => addon.tree_sha_short ?? "", { id: "hash" }),
-  ...(withState ? [stateColumn] : []),
-  columnHelper.accessor("mode", { id: "mode" }),
-  columnHelper.accessor("file_count", { id: "files" }),
-  columnHelper.accessor("size_bytes", { id: "size" }),
-] as ColumnDef<Addon, unknown>[];
+const titleColumn = columnHelper.accessor("title", {
+  id: "title",
+  sortingFn: (a, b) => compareTitles(a.original, b.original),
+});
+const versionColumn = columnHelper.accessor((addon) => addon.version ?? "", { id: "version" });
+const interfaceColumn = columnHelper.accessor((addon) => addon.interface ?? "", {
+  id: "interface",
+});
+const sizeColumn = columnHelper.accessor("size_bytes", { id: "size" });
+
+/**
+ * In der Charakter-Ansicht zählt, ob ein Addon geladen wird — nicht seine
+ * Identität. Hash, Modus und Dateizahl wandern deshalb dort in den
+ * Detailbereich, statt Spalten zu belegen.
+ */
+const columns = (
+  withState
+    ? [titleColumn, versionColumn, interfaceColumn, stateColumn, sizeColumn]
+    : [
+        titleColumn,
+        versionColumn,
+        interfaceColumn,
+        columnHelper.accessor((addon) => addon.tree_sha_short ?? "", { id: "hash" }),
+        columnHelper.accessor("mode", { id: "mode" }),
+        columnHelper.accessor("file_count", { id: "files" }),
+        sizeColumn,
+      ]
+) as ColumnDef<Addon, unknown>[];
+
+/** Anzahl der Spalten — für `colspan` der Detail- und Leerzeile. */
+const columnCount = columns.length;
 
 /** Spalten, deren Werte Zahlen sind, werden rechtsbündig gesetzt. */
 const NUMERIC = new Set(["files", "size"]);
@@ -179,7 +209,7 @@ async function copyHash(addon: Addon) {
 
     <!-- Nur der Rumpf blättert; der Spaltenkopf klebt oben, sonst weiß man bei
          242 Zeilen nach dem ersten Bildschirm nicht mehr, welche Spalte was ist. -->
-    <div class="min-h-0 flex-1 overflow-auto">
+    <div class="tome-scroll min-h-0 flex-1">
       <table class="w-full border-collapse text-left">
         <thead class="tome-sticky-head">
           <tr class="border-b border-gold-700/50">
@@ -266,7 +296,6 @@ async function copyHash(addon: Addon) {
                 >
                 <span v-else class="tome-data opacity-50">—</span>
               </td>
-              <td class="tome-data py-1.5 pr-3">{{ shortHash(row.original) }}</td>
               <td v-if="withState" class="py-1.5 pr-3">
                 <span
                   v-if="stateFor(props.character ?? null, row.original) === true"
@@ -280,7 +309,8 @@ async function copyHash(addon: Addon) {
                 >
                 <span v-else class="tome-data opacity-40" :title="t('addons.unseenTitle')">—</span>
               </td>
-              <td class="py-1.5 pr-3">
+              <td v-if="!withState" class="tome-data py-1.5 pr-3">{{ shortHash(row.original) }}</td>
+              <td v-if="!withState" class="py-1.5 pr-3">
                 <!-- Nur die Ausnahme benennen: „Git-Checkout". Ob die übrigen
                      Dateien aus einem ZIP, von Hand oder von einem anderen
                      Manager stammen, wissen wir nicht — „ZIP" wäre erfunden. -->
@@ -290,14 +320,14 @@ async function copyHash(addon: Addon) {
                   >{{ t("addons.mode.developer") }}</span
                 >
               </td>
-              <td class="tome-data py-1.5 pr-3 text-right">
+              <td v-if="!withState" class="tome-data py-1.5 pr-3 text-right">
                 {{ fmtCount(row.original.file_count) }}
               </td>
               <td class="tome-data py-1.5 text-right">{{ fmtBytes(row.original.size_bytes) }}</td>
             </tr>
 
             <tr v-if="row.getIsExpanded()" class="border-b border-ink-500/15">
-              <td :colspan="withState ? 8 : 7" class="bg-gold-500/5 px-6 py-3">
+              <td :colspan="columnCount" class="bg-gold-500/5 px-6 py-3">
                 <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
                   <dt class="opacity-60">{{ t("addons.detail.author") }}</dt>
                   <dd>{{ row.original.author ?? "—" }}</dd>
@@ -317,6 +347,18 @@ async function copyHash(addon: Addon) {
 
                   <dt class="opacity-60">{{ t("addons.detail.notes") }}</dt>
                   <dd>{{ row.original.notes ?? "—" }}</dd>
+
+                  <template v-if="withState">
+                    <!-- In der Charakter-Ansicht nicht als Spalte gezeigt —
+                         hier aber vollständig verfügbar. -->
+                    <dt class="opacity-60">{{ t("addons.columns.mode") }}</dt>
+                    <dd class="tome-data">
+                      {{ row.original.mode === "developer" ? t("addons.mode.developer") : "—" }}
+                    </dd>
+
+                    <dt class="opacity-60">{{ t("addons.columns.files") }}</dt>
+                    <dd class="tome-data">{{ fmtCount(row.original.file_count) }}</dd>
+                  </template>
 
                   <dt class="opacity-60">{{ t("addons.detail.path") }}</dt>
                   <dd class="tome-data break-all">{{ row.original.path }}</dd>
@@ -349,31 +391,32 @@ async function copyHash(addon: Addon) {
           </template>
 
           <tr v-if="rows.length === 0">
-            <td :colspan="withState ? 8 : 7" class="py-6 text-center opacity-70">{{ t("addons.empty") }}</td>
+            <td :colspan="columnCount" class="py-6 text-center opacity-70">{{ t("addons.empty") }}</td>
           </tr>
         </tbody>
       </table>
+
+      <!-- Übersprungene Ordner bleiben sichtbar statt still zu verschwinden:
+           ein falsch benanntes .toc ist ein echter Installationsfehler, den der
+           Nutzer sonst nie erfährt (WoW lädt den Ordner ebenfalls nicht). -->
+      <div v-if="props.scan.skipped.length" class="mt-5 border-t border-gold-700/30 pt-3">
+        <button
+          type="button"
+          class="cursor-pointer text-sm opacity-70 hover:opacity-100"
+          :aria-expanded="showSkipped"
+          @click="showSkipped = !showSkipped"
+        >
+          <span aria-hidden="true">{{ showSkipped ? "▼" : "▸" }}</span>
+          {{ t("addons.skipped", { n: props.scan.skipped.length }, props.scan.skipped.length) }}
+        </button>
+        <ul v-if="showSkipped" class="mt-2 space-y-1 text-sm">
+          <li v-for="folder in props.scan.skipped" :key="folder.id" class="flex flex-wrap gap-2">
+            <span class="tome-data">{{ folder.id }}</span>
+            <span class="opacity-60">{{ folder.reason }}</span>
+          </li>
+        </ul>
+      </div>
     </div>
 
-    <!-- Übersprungene Ordner bleiben sichtbar statt still zu verschwinden:
-         ein falsch benanntes .toc ist ein echter Installationsfehler, den der
-         Nutzer sonst nie erfährt (WoW lädt den Ordner ebenfalls nicht). -->
-    <div v-if="props.scan.skipped.length" class="mt-5 shrink-0 border-t border-gold-700/30 pt-3">
-      <button
-        type="button"
-        class="cursor-pointer text-sm opacity-70 hover:opacity-100"
-        :aria-expanded="showSkipped"
-        @click="showSkipped = !showSkipped"
-      >
-        <span aria-hidden="true">{{ showSkipped ? "▼" : "▸" }}</span>
-        {{ t("addons.skipped", { n: props.scan.skipped.length }, props.scan.skipped.length) }}
-      </button>
-      <ul v-if="showSkipped" class="mt-2 space-y-1 text-sm">
-        <li v-for="folder in props.scan.skipped" :key="folder.id" class="flex flex-wrap gap-2">
-          <span class="tome-data">{{ folder.id }}</span>
-          <span class="opacity-60">{{ folder.reason }}</span>
-        </li>
-      </ul>
-    </div>
   </section>
 </template>

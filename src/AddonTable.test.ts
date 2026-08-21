@@ -327,22 +327,44 @@ describe("AddonTable – Aktiv-Zustand", () => {
 
   it("unterscheidet mit Charakter aktiv, aus und nie gesehen", () => {
     const wrapper = mountTable(scan, { character: zinnober });
-    const cell = (row: number) => wrapper.findAll("tbody tr")[row].findAll("td")[4].text();
+    const cell = (row: number) => wrapper.findAll("tbody tr")[row].findAll("td")[3].text();
     expect(cell(0)).toBe("aktiv");
-    expect(cell(1)).toBe("aus");
     // „Nie gesehen" ist etwas anderes als „abgeschaltet".
-    expect(cell(2)).toBe("—");
-    expect(wrapper.findAll("tbody tr")[0].findAll("td")).toHaveLength(8);
+    expect(cell(1)).toBe("—");
+    expect(cell(2)).toBe("aus");
   });
 
-  it("sortiert nie-gesehen zwischen aus und aktiv", async () => {
-    // Erster Klick absteigend (Zahlenspalte) — hier die nützlichere Vorgabe:
-    // „was ist aktiv" zuerst. Entscheidend ist die Mitte.
+  it("lässt Hash, Modus und Dateizahl weg — die zählen hier nicht", () => {
     const wrapper = mountTable(scan, { character: zinnober });
-    await wrapper.findAll("thead button")[4].trigger("click");
+    const headers = wrapper.findAll("thead th").map((h) => h.text());
+    expect(headers.some((h) => h.includes("Hash"))).toBe(false);
+    expect(headers.some((h) => h.includes("Modus"))).toBe(false);
+    expect(headers.some((h) => h.includes("Dateien"))).toBe(false);
+    // Addon, Version, Interface, Aktiv, Größe
+    expect(wrapper.findAll("tbody tr")[0].findAll("td")).toHaveLength(5);
+  });
+
+  it("hält das Weggelassene im Detailbereich bereit", async () => {
+    const wrapper = mountTable(scan, { character: zinnober });
+    await wrapper.findAll("tbody tr")[0].find("td button").trigger("click");
+    const detail = wrapper.findAll("tbody tr")[1].text();
+    expect(detail).toContain("Modus");
+    expect(detail).toContain("Dateien");
+    expect(detail).toContain("Tree-Hash");
+  });
+
+  it("sortiert beim Charakter von sich aus nach Aktiv, dann alphabetisch", async () => {
+    // Die Frage der Ansicht lautet „was lädt dieser Charakter?" — das soll
+    // ohne einen einzigen Klick beantwortet sein.
+    const wrapper = mountTable(scan, { character: zinnober });
     expect(titles(wrapper)).toEqual(["An", "Ungesehen", "Aus"]);
-    await wrapper.findAll("thead button")[4].trigger("click");
+    // Und „nie gesehen" liegt zwischen aktiv und aus, statt zu verschmelzen.
+    await wrapper.findAll("thead button")[3].trigger("click");
     expect(titles(wrapper)).toEqual(["Aus", "Ungesehen", "An"]);
+  });
+
+  it("sortiert ohne Charakter weiterhin alphabetisch", () => {
+    expect(titles(mountTable(scan))).toEqual(["An", "Aus", "Ungesehen"]);
   });
 
   it("zeigt DefaultState im Detail, getrennt vom echten Zustand", async () => {

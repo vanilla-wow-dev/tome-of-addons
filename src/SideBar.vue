@@ -57,7 +57,7 @@ const TONE: Record<string, string> = {
          bei sieben Accounts wird sie sonst länger als das Fenster. -->
     <template v-if="characters.length">
       <p class="tome-heading mt-5 mb-1 shrink-0 px-1">{{ t("nav.characters") }}</p>
-      <div class="min-h-0 flex-1 overflow-y-auto">
+      <div class="tome-scroll min-h-0 flex-1">
       <button
         v-for="character in characters"
         :key="character.path"

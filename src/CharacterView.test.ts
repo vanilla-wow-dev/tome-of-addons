@@ -99,7 +99,8 @@ describe("CharacterView", () => {
   it("reicht den Charakter an die Tabelle durch", () => {
     const wrapper = mountView();
     // Aktiv-Spalte ist vorhanden, weil ein Charakter gesetzt ist.
-    expect(wrapper.findAll("thead th").map((h) => h.text())).toContain("Aktiv ▲");
+    // Absteigend vorsortiert: aktiv zuerst.
+    expect(wrapper.findAll("thead th").map((h) => h.text())).toContain("Aktiv ▼");
     expect(wrapper.text()).toContain("aktiv");
   });
 });

@@ -283,7 +283,7 @@ async function restartNow() {
       <div class="tome-panel flex min-h-0 min-w-0 flex-1 flex-col p-5">
         <WowView
           v-if="view === 'wow'"
-          class="min-h-0 flex-1 overflow-y-auto"
+          class="tome-scroll min-h-0 flex-1"
           :detection="detection"
           :exe-info="exeInfo"
           :health="health"
@@ -293,7 +293,7 @@ async function restartNow() {
         />
 
         <template v-else>
-          <div v-if="addonBusy" class="min-h-0 flex-1 overflow-y-auto">
+          <div v-if="addonBusy" class="tome-scroll min-h-0 flex-1">
             <p class="tome-heading mb-3">{{ t("addons.title") }}</p>
             <p class="mb-2 text-sm opacity-70">
               {{
