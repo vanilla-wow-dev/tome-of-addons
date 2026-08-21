@@ -15,7 +15,7 @@ use crate::addons::{scan_with, HashCache, Scan};
 use crate::client::{state as client_state, ClientState};
 use crate::exe::{inspect_wow_exe, WowExeInfo};
 use crate::wow::{addons_dir, detect, Detection};
-use crate::wtf::{list_characters, Character};
+use crate::wtf::{list_characters, read_settings, Character, Settings};
 
 /// Erkennt die zu verwaltende Installation (Walk-up) + Vorschläge (Registry).
 #[tauri::command]
@@ -68,6 +68,12 @@ fn cache_path(app: &tauri::AppHandle, root: &Path) -> Result<PathBuf, String> {
 #[tauri::command]
 pub fn client_state_command(root: String) -> ClientState {
     client_state(Path::new(&root))
+}
+
+/// Liest die Addon-relevanten Client-Einstellungen aus `WTF/Config.wtf`.
+#[tauri::command]
+pub fn wow_settings_command(root: String) -> Settings {
+    read_settings(Path::new(&root))
 }
 
 /// Listet alle Charaktere mit eigener Addon-Auswahl.

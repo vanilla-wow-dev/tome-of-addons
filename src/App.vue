@@ -13,6 +13,7 @@ import {
   type Character,
   type ClientState,
   type ScanProgress,
+  type WowSettings,
 } from "./addons";
 import { SUPPORTED_LOCALES, setLocale, type Locale } from "./i18n";
 import SideBar from "./SideBar.vue";
@@ -40,6 +41,7 @@ const addonError = ref("");
 const addonBusy = ref(false);
 const scanProgress = ref<ScanProgress | null>(null);
 const characters = ref<Character[]>([]);
+const settings = ref<WowSettings>({ loads_outdated_addons: false });
 let unlistenProgress: UnlistenFn | undefined;
 let clientTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -74,6 +76,7 @@ async function detectWow() {
     detection.value = result;
     if (result.managed) {
       await refreshClientState(result.managed.path);
+      await loadSettings(result.managed.path);
       await loadCharacters(result.managed.path);
       await scanAddons(result.managed.path);
     }
@@ -99,6 +102,18 @@ async function refreshClientState(root: string) {
     clientState.value = await invoke<ClientState>("client_state_command", { root });
   } catch {
     clientState.value = "not-running";
+  }
+}
+
+/**
+ * Client-Einstellungen. Bei einem Fehler bleibt es beim Client-Vorgabewert
+ * „veraltete werden nicht geladen" — nichts versprechen, was nicht gilt.
+ */
+async function loadSettings(root: string) {
+  try {
+    settings.value = await invoke<WowSettings>("wow_settings_command", { root });
+  } catch {
+    settings.value = { loads_outdated_addons: false };
   }
 }
 
@@ -335,6 +350,7 @@ async function restartNow() {
             :character="activeCharacter"
             :scan="addonScan"
             :client-interface="clientInterface"
+            :loads-outdated="settings.loads_outdated_addons"
           />
 
           <section v-else-if="addonScan" class="flex min-h-0 flex-1 flex-col">
@@ -344,6 +360,7 @@ async function restartNow() {
               class="min-h-0 flex-1"
               :scan="addonScan"
               :client-interface="clientInterface"
+              :loads-outdated="settings.loads_outdated_addons"
             />
           </section>
         </template>

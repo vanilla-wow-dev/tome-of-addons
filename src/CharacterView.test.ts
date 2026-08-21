@@ -58,6 +58,7 @@ describe("CharacterView", () => {
         character: character({ an: true, aus: false, altundan: true }),
         scan,
         clientInterface,
+        loadsOutdated: true,
       },
     });
   }
@@ -91,6 +92,7 @@ describe("CharacterView", () => {
           addon({ id: "B", title: "B", interface: "11100" }),
         ]),
         clientInterface: "11200",
+        loadsOutdated: true,
       },
     });
     expect(many.text()).toContain("2 aktive Addons sind veraltet");

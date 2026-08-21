@@ -57,9 +57,11 @@ export default {
     title: "Extensions",
     search: "Rechercher (nom, auteur, empreinte, chemin)…",
     developerOnly: "Dépôts Git uniquement",
-    outdatedOnly: "Obsolètes uniquement ({n})",
-    outdatedHint:
-      "{n} extension déclare une version d’interface différente de celle de votre client ({client}). WoW ne la charge que si « Charger les AddOns obsolètes » est activé. | {n} extensions déclarent une version d’interface différente de celle de votre client ({client}). WoW ne les charge que si « Charger les AddOns obsolètes » est activé.",
+    showOutdated: "Afficher aussi les obsolètes ({n})",
+    outdatedHidden:
+      "{n} extension est obsolète ({client} attendu) et votre client ne la chargera pas — elle est masquée ici. | {n} extensions sont obsolètes ({client} attendu) et votre client ne les chargera pas — elles sont masquées ici.",
+    outdatedLoaded:
+      "{n} extension est obsolète ({client} attendu). Votre client la charge quand même car « Charger les AddOns obsolètes » est activé. | {n} extensions sont obsolètes ({client} attendu). Votre client les charge quand même car « Charger les AddOns obsolètes » est activé.",
     outdatedTitle: "Obsolète — le client attend {client}",
     character: "Personnage",
     noCharacter: "— aucun —",

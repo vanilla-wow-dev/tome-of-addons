@@ -211,6 +211,10 @@
    über die letzte Spalte. */
 @utility tome-scroll {
   overflow: auto;
+  /* `scrollbar-gutter` allein genügt nicht: WebKitGTK zeichnet Overlay-Balken,
+     die keinen Platz beanspruchen und sich damit über die letzte Spalte legen.
+     Das Polster reserviert ihn unabhängig von der Engine. */
+  padding-right: 0.85rem;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: var(--color-gold-500)

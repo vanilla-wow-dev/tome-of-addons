@@ -75,13 +75,19 @@ function character(states: Record<string, boolean>): Character {
 
 function mountTable(
   scan: AddonScan = SCAN,
-  opts: { clientInterface?: string | null; character?: Character | null } = {},
+  opts: {
+    clientInterface?: string | null;
+    character?: Character | null;
+    /** Standard: wie der Client — veraltete werden nicht geladen. */
+    loadsOutdated?: boolean;
+  } = {},
 ) {
   return mount(AddonTable, {
     props: {
       scan,
       clientInterface: opts.clientInterface ?? null,
       character: opts.character ?? null,
+      loadsOutdated: opts.loadsOutdated ?? true,
     },
   });
 }
@@ -277,8 +283,9 @@ describe("AddonTable – Interface-Version", () => {
       ...SCAN,
       addons: [addon({ id: "Alt", title: "Alt", interface: "11000" })],
     };
-    const wrapper = mountTable(scan, { clientInterface: "11200" });
-    // Ohne diesen Hinweis sucht der Nutzer den Fehler beim Addon.
+    // Ohne diesen Hinweis sucht der Nutzer den Fehler beim Addon — oder
+    // wundert sich, warum Einträge fehlen.
+    const wrapper = mountTable(scan, { clientInterface: "11200", loadsOutdated: true });
     expect(wrapper.text()).toContain("Veraltete AddOns laden");
     expect(wrapper.text()).toContain("11200");
   });
@@ -289,18 +296,42 @@ describe("AddonTable – Interface-Version", () => {
     expect(wrapper.text()).not.toContain("Veraltete AddOns laden");
   });
 
-  it("filtert auf veraltete Addons", async () => {
-    const scan: AddonScan = {
-      ...SCAN,
-      addons: [
-        addon({ id: "Aktuell", title: "Aktuell", interface: "11200" }),
-        addon({ id: "Alt", title: "Alt", interface: "11000" }),
-      ],
-    };
-    const wrapper = mountTable(scan, { clientInterface: "11200" });
+  const mixed: AddonScan = {
+    ...SCAN,
+    addons: [
+      addon({ id: "Aktuell", title: "Aktuell", interface: "11200" }),
+      addon({ id: "Alt", title: "Alt", interface: "11000" }),
+    ],
+  };
+
+  it("blendet veraltete aus, wenn der Client sie nicht lädt", () => {
+    // Die Liste spiegelt, was im Spiel ankommt: was der Client nicht lädt,
+    // existiert dort faktisch nicht.
+    const wrapper = mountTable(mixed, { clientInterface: "11200", loadsOutdated: false });
+    expect(titles(wrapper)).toEqual(["Aktuell"]);
+    expect(wrapper.text()).toContain("ist hier ausgeblendet");
+  });
+
+  it("zeigt veraltete mit, wenn der Client sie lädt", () => {
+    const wrapper = mountTable(mixed, { clientInterface: "11200", loadsOutdated: true });
+    expect(titles(wrapper)).toEqual(["Aktuell", "Alt"]);
+    expect(wrapper.text()).toContain("lädt es trotzdem");
+  });
+
+  it("holt ausgeblendete veraltete auf Wunsch zurück", async () => {
+    const wrapper = mountTable(mixed, { clientInterface: "11200", loadsOutdated: false });
     const checkbox = wrapper.findAll("input[type=checkbox]")[1];
+    expect((checkbox.element as HTMLInputElement).checked).toBe(false);
     await checkbox.setValue(true);
-    expect(titles(wrapper)).toEqual(["Alt"]);
+    expect(titles(wrapper)).toEqual(["Aktuell", "Alt"]);
+  });
+
+  it("lässt sie auf Wunsch auch wieder verschwinden", async () => {
+    const wrapper = mountTable(mixed, { clientInterface: "11200", loadsOutdated: true });
+    const checkbox = wrapper.findAll("input[type=checkbox]")[1];
+    expect((checkbox.element as HTMLInputElement).checked).toBe(true);
+    await checkbox.setValue(false);
+    expect(titles(wrapper)).toEqual(["Aktuell"]);
   });
 });
 
@@ -488,6 +519,13 @@ describe("AddonTable – übersprungene Ordner", () => {
       ],
     });
     expect(many.text()).toContain("2 folders skipped");
+  });
+
+  it("erscheint nicht in der Charakter-Ansicht", () => {
+    // Welcher Ordner kein gültiges .toc hat, ist eine Eigenschaft der
+    // Installation, nicht eines Charakters.
+    const wrapper = mountTable(SCAN, { character: character({}) });
+    expect(wrapper.text()).not.toContain("übersprungen");
   });
 
   it("blendet den Abschnitt aus, wenn nichts übersprungen wurde", () => {

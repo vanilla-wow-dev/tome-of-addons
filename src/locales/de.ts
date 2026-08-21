@@ -58,9 +58,11 @@ export default {
     title: "Addons",
     search: "Suchen (Name, Autor, Hash, Pfad)…",
     developerOnly: "Nur Git-Checkouts",
-    outdatedOnly: "Nur veraltete ({n})",
-    outdatedHint:
-      "{n} Addon hat eine andere Interface-Version als dein Client ({client}). WoW lädt es nur, wenn im AddOn-Fenster „Veraltete AddOns laden“ aktiviert ist. | {n} Addons haben eine andere Interface-Version als dein Client ({client}). WoW lädt sie nur, wenn im AddOn-Fenster „Veraltete AddOns laden“ aktiviert ist.",
+    showOutdated: "Auch veraltete zeigen ({n})",
+    outdatedHidden:
+      "{n} Addon ist veraltet ({client} erwartet) und wird von deinem Client nicht geladen — es ist hier ausgeblendet. | {n} Addons sind veraltet ({client} erwartet) und werden von deinem Client nicht geladen — sie sind hier ausgeblendet.",
+    outdatedLoaded:
+      "{n} Addon ist veraltet ({client} erwartet). Dein Client lädt es trotzdem, weil „Veraltete AddOns laden“ aktiv ist. | {n} Addons sind veraltet ({client} erwartet). Dein Client lädt sie trotzdem, weil „Veraltete AddOns laden“ aktiv ist.",
     outdatedTitle: "Veraltet — Client erwartet {client}",
     character: "Charakter",
     noCharacter: "— keiner —",

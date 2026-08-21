@@ -8,6 +8,7 @@ const props = defineProps<{
   character: Character;
   scan: AddonScan;
   clientInterface: string | null;
+  loadsOutdated: boolean;
 }>();
 const { t } = useI18n();
 
@@ -58,6 +59,7 @@ const activeButOutdated = computed(
       :scan="scan"
       :client-interface="clientInterface"
       :character="character"
+      :loads-outdated="loadsOutdated"
     />
   </section>
 </template>

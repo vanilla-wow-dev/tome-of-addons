@@ -18,7 +18,8 @@ pub fn run() {
             commands::relocate_into_command,
             commands::scan_addons_command,
             commands::list_characters_command,
-            commands::client_state_command
+            commands::client_state_command,
+            commands::wow_settings_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -18,6 +18,56 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+/// Client-Einstellungen aus `WTF/Config.wtf`, soweit sie Addons betreffen.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Settings {
+    /// Lädt der Client Addons mit abweichender Interface-Version?
+    ///
+    /// Entspricht dem Häkchen „Veraltete AddOns laden" im AddOn-Fenster.
+    pub loads_outdated_addons: bool,
+}
+
+/// CVar, hinter der das Häkchen steckt. `1` heißt Versionsprüfung *an*, also
+/// veraltete Addons **nicht** laden.
+const CVAR_CHECK_ADDON_VERSION: &str = "checkAddonVersion";
+
+/// Liest die Addon-relevanten Einstellungen.
+///
+/// Fehlt die Datei oder die CVar, gilt der Client-Vorgabewert: WoW 1.12
+/// schreibt CVars erst beim Ändern, und unverändert ist die Versionsprüfung
+/// eingeschaltet. Ein fehlender Eintrag heißt also „lädt keine veralteten".
+pub fn read_settings(root: &Path) -> Settings {
+    let value = crate::wow::find_child(root, "wtf")
+        .and_then(|wtf| crate::wow::find_child(&wtf, "config.wtf"))
+        .and_then(|file| std::fs::read(file).ok())
+        .and_then(|raw| parse_cvar(&String::from_utf8_lossy(&raw), CVAR_CHECK_ADDON_VERSION));
+
+    Settings {
+        // Alles außer einer ausdrücklichen 0 gilt als „prüft Versionen" — im
+        // Zweifel nichts versprechen, was der Client nicht hält.
+        loads_outdated_addons: value.as_deref() == Some("0"),
+    }
+}
+
+/// Sucht `SET <name> "<wert>"` in einer `Config.wtf`.
+///
+/// Der Name wird case-insensitiv verglichen; WoW schreibt ihn in gemischter
+/// Schreibweise, andere Werkzeuge nicht unbedingt.
+fn parse_cvar(text: &str, name: &str) -> Option<String> {
+    for line in text.lines() {
+        let Some(rest) = line.trim().strip_prefix("SET ") else {
+            continue;
+        };
+        let Some((key, value)) = rest.trim_start().split_once(char::is_whitespace) else {
+            continue;
+        };
+        if key.eq_ignore_ascii_case(name) {
+            return Some(value.trim().trim_matches('"').to_string());
+        }
+    }
+    None
+}
+
 /// Ein Charakter mit eigener Addon-Auswahl.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct Character {
@@ -263,6 +313,92 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("addons.txt"), "pfUI: enabled\n").unwrap();
         assert_eq!(list_characters(tree.path()).len(), 1);
+    }
+
+    // ----------------------------------------------- Client-Einstellungen
+
+    /// Legt `WTF/Config.wtf` mit dem gegebenen Inhalt an.
+    fn config(tree: &TempRoot, body: &str) {
+        let dir = tree.path().join("WTF");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("Config.wtf"), body).unwrap();
+    }
+
+    #[test]
+    fn ohne_config_gilt_der_client_vorgabewert() {
+        // WoW schreibt CVars erst beim Ändern. Unverändert ist die
+        // Versionsprüfung an — veraltete Addons werden also nicht geladen.
+        let tree = TempRoot::new("no-config");
+        assert!(!read_settings(tree.path()).loads_outdated_addons);
+    }
+
+    #[test]
+    fn fehlende_cvar_gilt_ebenfalls_als_vorgabewert() {
+        let tree = TempRoot::new("cvar-missing");
+        config(
+            &tree,
+            "SET gxResolution \"2560x1440\"\nSET farclip \"777\"\n",
+        );
+        assert!(!read_settings(tree.path()).loads_outdated_addons);
+    }
+
+    #[test]
+    fn null_bedeutet_veraltete_werden_geladen() {
+        let tree = TempRoot::new("cvar-zero");
+        config(
+            &tree,
+            "SET gxResolution \"2560x1440\"\nSET checkAddonVersion \"0\"\n",
+        );
+        assert!(read_settings(tree.path()).loads_outdated_addons);
+    }
+
+    #[test]
+    fn eins_bedeutet_versionspruefung_bleibt_an() {
+        let tree = TempRoot::new("cvar-one");
+        config(&tree, "SET checkAddonVersion \"1\"\n");
+        assert!(!read_settings(tree.path()).loads_outdated_addons);
+    }
+
+    #[test]
+    fn unerwarteter_wert_verspricht_nichts() {
+        // Im Zweifel nichts behaupten, was der Client nicht hält.
+        let tree = TempRoot::new("cvar-junk");
+        config(&tree, "SET checkAddonVersion \"vielleicht\"\n");
+        assert!(!read_settings(tree.path()).loads_outdated_addons);
+    }
+
+    #[test]
+    fn cvar_name_wird_case_insensitiv_erkannt() {
+        let tree = TempRoot::new("cvar-case");
+        config(&tree, "SET CHECKADDONVERSION \"0\"\n");
+        assert!(read_settings(tree.path()).loads_outdated_addons);
+    }
+
+    #[test]
+    fn ueberspringt_zeilen_die_keine_cvars_sind() {
+        assert_eq!(
+            parse_cvar(
+                // Kommentarzeile, „SET" ohne Leerzeichen, und ein Schlüssel ganz
+                // ohne Wert — nichts davon darf den Parser aus dem Tritt bringen.
+                "# Kommentar\nSETohneLeerzeichen \"0\"\nSET nurSchluessel\nSET a \"1\"\n",
+                "a"
+            ),
+            Some("1".to_string())
+        );
+        assert_eq!(parse_cvar("", "a"), None);
+    }
+
+    #[test]
+    fn settings_serialisieren_fuer_das_frontend() {
+        let settings = Settings {
+            loads_outdated_addons: true,
+        };
+        assert_eq!(
+            serde_json::to_string(&settings).unwrap(),
+            "{\"loads_outdated_addons\":true}"
+        );
+        assert!(format!("{settings:?}").contains("loads_outdated_addons"));
+        assert_eq!(settings, settings);
     }
 
     #[test]

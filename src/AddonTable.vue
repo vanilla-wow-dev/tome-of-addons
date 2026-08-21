@@ -35,6 +35,11 @@ const props = defineProps<{
    * Aktiv-Spalte, statt eine Spalte voller Striche zu zeigen.
    */
   character?: Character | null;
+  /**
+   * Lädt der Client veraltete Addons? Bestimmt, ob sie hier von vornherein
+   * mitgezeigt werden — die Liste soll spiegeln, was im Spiel ankommt.
+   */
+  loadsOutdated: boolean;
 }>();
 const { t } = useI18n();
 
@@ -47,7 +52,12 @@ const withState = props.character != null;
 
 const query = ref("");
 const developerOnly = ref(false);
-const outdatedOnly = ref(false);
+/**
+ * Veraltete Addons werden dem Client nachempfunden: lädt er sie nicht, sind
+ * sie hier zunächst ausgeblendet, denn im Spiel existieren sie faktisch nicht.
+ * Das Häkchen holt sie zurück.
+ */
+const showOutdated = ref(props.loadsOutdated);
 /**
  * Beim Charakter gibt der Aktiv-Zustand die Reihenfolge vor: aktiv zuerst,
  * innerhalb dessen alphabetisch. Das beantwortet die eigentliche Frage der
@@ -75,7 +85,7 @@ const rows = computed(() =>
   props.scan.addons.filter(
     (addon) =>
       (!developerOnly.value || addon.mode === "developer") &&
-      (!outdatedOnly.value || interfaceStatus(addon, props.clientInterface) === "outdated") &&
+      (showOutdated.value || interfaceStatus(addon, props.clientInterface) !== "outdated") &&
       matchesQuery(addon, query.value),
   ),
 );
@@ -189,22 +199,27 @@ async function copyHash(addon: Addon) {
         v-if="outdatedCount"
         class="text-verdict-warn dark:text-verdict-warn-dark flex cursor-pointer items-center gap-2 text-sm"
       >
-        <input v-model="outdatedOnly" type="checkbox" class="accent-gold-700" />
-        {{ t("addons.outdatedOnly", { n: outdatedCount }) }}
+        <input v-model="showOutdated" type="checkbox" class="accent-gold-700" />
+        {{ t("addons.showOutdated", { n: outdatedCount }) }}
       </label>
       <p class="tome-data ml-auto opacity-70">
         {{ t("addons.count", { shown: rows.length, total: props.scan.addons.length }) }}
       </p>
     </div>
 
-    <!-- Der Client lädt veraltete Addons nur mit dem entsprechenden Haken im
-         AddOn-Fenster. Ohne diesen Hinweis sucht der Nutzer den Fehler beim
-         Addon statt bei der Interface-Version. -->
+    <!-- Ohne diesen Hinweis sucht der Nutzer den Fehler beim Addon statt bei
+         der Interface-Version — und wüsste nicht, warum Einträge fehlen. -->
     <p
       v-if="outdatedCount"
       class="text-verdict-warn dark:text-verdict-warn-dark mb-4 shrink-0 text-sm"
     >
-      {{ t("addons.outdatedHint", { n: outdatedCount, client: props.clientInterface }, outdatedCount) }}
+      {{
+        t(
+          props.loadsOutdated ? "addons.outdatedLoaded" : "addons.outdatedHidden",
+          { n: outdatedCount, client: props.clientInterface },
+          outdatedCount,
+        )
+      }}
     </p>
 
     <!-- Nur der Rumpf blättert; der Spaltenkopf klebt oben, sonst weiß man bei
@@ -399,7 +414,12 @@ async function copyHash(addon: Addon) {
       <!-- Übersprungene Ordner bleiben sichtbar statt still zu verschwinden:
            ein falsch benanntes .toc ist ein echter Installationsfehler, den der
            Nutzer sonst nie erfährt (WoW lädt den Ordner ebenfalls nicht). -->
-      <div v-if="props.scan.skipped.length" class="mt-5 border-t border-gold-700/30 pt-3">
+      <!-- Nur in der Addon-Ansicht: welcher Ordner kein gültiges .toc hat, ist
+           eine Eigenschaft der Installation, nicht eines Charakters. -->
+      <div
+        v-if="!withState && props.scan.skipped.length"
+        class="mt-5 border-t border-gold-700/30 pt-3"
+      >
         <button
           type="button"
           class="cursor-pointer text-sm opacity-70 hover:opacity-100"

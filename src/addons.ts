@@ -35,6 +35,12 @@ export interface Character {
   states: Record<string, boolean>;
 }
 
+/** Addon-relevante Client-Einstellungen aus WTF/Config.wtf. */
+export interface WowSettings {
+  /** Lädt der Client Addons mit abweichender Interface-Version? */
+  loads_outdated_addons: boolean;
+}
+
 /** Läuft gerade ein WoW-Client aus dieser Installation? */
 export type ClientState = "not-running" | "running-here" | "running-unknown";
 

@@ -57,9 +57,11 @@ export default {
     title: "Addons",
     search: "Search (name, author, hash, path)…",
     developerOnly: "Git checkouts only",
-    outdatedOnly: "Outdated only ({n})",
-    outdatedHint:
-      "{n} addon declares a different interface version than your client ({client}). WoW only loads it when “Load out of date AddOns” is enabled in the AddOns window. | {n} addons declare a different interface version than your client ({client}). WoW only loads them when “Load out of date AddOns” is enabled in the AddOns window.",
+    showOutdated: "Show outdated too ({n})",
+    outdatedHidden:
+      "{n} addon is out of date ({client} expected) and your client will not load it — it is hidden here. | {n} addons are out of date ({client} expected) and your client will not load them — they are hidden here.",
+    outdatedLoaded:
+      "{n} addon is out of date ({client} expected). Your client loads it anyway because “Load out of date AddOns” is enabled. | {n} addons are out of date ({client} expected). Your client loads them anyway because “Load out of date AddOns” is enabled.",
     outdatedTitle: "Out of date — client expects {client}",
     character: "Character",
     noCharacter: "— none —",
