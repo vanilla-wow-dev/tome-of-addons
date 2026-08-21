@@ -71,7 +71,6 @@ const SCAN = {
       tree_sha_short: "7c1d90ffaa11",
       mode: "consumer" as const,
       default_state: "disabled",
-      enabled: null,
       file_count: 2310,
       size_bytes: 78_000_000,
       cached: false,
@@ -97,7 +96,9 @@ function mockInvoke(
       name: string;
       path: string;
       label: string;
+      states: Record<string, boolean>;
     }>;
+    loadsOutdated?: boolean;
   } = {},
 ) {
   invoke.mockImplementation((cmd: string) => {
@@ -108,6 +109,9 @@ function mockInvoke(
       return opts.relocateFails
         ? Promise.reject(new Error("Plattenfehler"))
         : Promise.resolve("/other/WoW/tome-of-addons");
+    if (cmd === "client_state_command") return Promise.resolve("not-running");
+    if (cmd === "wow_settings_command")
+      return Promise.resolve({ loads_outdated_addons: opts.loadsOutdated ?? true });
     if (cmd === "list_characters_command") return Promise.resolve(opts.characters ?? []);
     if (cmd === "scan_addons_command")
       return opts.scanFails
@@ -119,6 +123,12 @@ function mockInvoke(
 
 function buttonByText(wrapper: VueWrapper, text: string) {
   return wrapper.findAll("button").find((b) => b.text().includes(text))!;
+}
+
+/** Wechselt über die Seitenleiste in eine Ansicht. */
+async function goTo(wrapper: VueWrapper, label: string) {
+  await buttonByText(wrapper, label).trigger("click");
+  await flushPromises();
 }
 
 beforeEach(() => {
@@ -361,46 +371,73 @@ describe("App – Update-Flow (automatischer Check)", () => {
   });
 });
 
-describe("App – Charaktere und Fortschritt", () => {
+describe("App – Seitenleiste, Charaktere und Fortschritt", () => {
   const CHARACTER = {
     account: "RYLON8",
     realm: "NostalGeek 1.12",
     name: "Zinnober",
     path: "/wtf/Zinnober/AddOns.txt",
     label: "Zinnober · NostalGeek 1.12 (RYLON8)",
+    states: { pfquest: true },
   };
 
-  it("lädt die Charakterliste und reicht die Auswahl an den Scan weiter", async () => {
+  it("startet auf der WoW-Ansicht und wechselt über die Seitenleiste", async () => {
+    mockInvoke({ managed: ROOT, suggestions: [] }, { scan: SCAN });
+    const wrapper = mount(App);
+    await flushPromises();
+
+    // Anfangs die Installation, nicht die Addon-Liste.
+    expect(wrapper.text()).toContain("Verwaltet");
+    expect(wrapper.text()).not.toContain("7c1d90ffaa11");
+
+    await goTo(wrapper, "Addons");
+    expect(wrapper.text()).toContain("7c1d90ffaa11");
+    expect(wrapper.text()).not.toContain("Verwaltet");
+  });
+
+  it("zeigt Charaktere als eigene Gruppe mit Anzahl aktiver Addons", async () => {
     mockInvoke({ managed: ROOT, suggestions: [] }, { scan: SCAN, characters: [CHARACTER] });
     const wrapper = mount(App);
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("list_characters_command", { root: "/games/WoW" });
-    const select = wrapper.findAll("select").find((s) => s.text().includes("Zinnober"))!;
-    await select.setValue("/wtf/Zinnober/AddOns.txt");
-    await flushPromises();
+    const entry = buttonByText(wrapper, "Zinnober");
+    // pfQuest ist im Scan und für den Charakter aktiv.
+    expect(entry.text()).toContain("1");
 
-    // Neu gescannt wird mit Charakter — die Hashes kommen dabei aus dem Cache.
-    expect(invoke).toHaveBeenCalledWith("scan_addons_command", {
-      root: "/games/WoW",
-      character: "/wtf/Zinnober/AddOns.txt",
-    });
+    await goTo(wrapper, "Zinnober");
+    expect(wrapper.text()).toContain("Zinnober · NostalGeek 1.12 (RYLON8)");
+    expect(wrapper.text()).toContain("1 aktiv");
+  });
+
+  it("wechselt den Charakter ohne erneuten Scan", async () => {
+    // Die Zustände kommen mit der Charakterliste — ein Wechsel ist reine
+    // Anzeige und darf keinen Rescan auslösen.
+    mockInvoke({ managed: ROOT, suggestions: [] }, { scan: SCAN, characters: [CHARACTER] });
+    const wrapper = mount(App);
+    await flushPromises();
+    const scansBefore = invoke.mock.calls.filter((c) => c[0] === "scan_addons_command").length;
+
+    await goTo(wrapper, "Zinnober");
+    const scansAfter = invoke.mock.calls.filter((c) => c[0] === "scan_addons_command").length;
+    expect(scansAfter).toBe(scansBefore);
   });
 
   it("kommt ohne Charakterliste aus", async () => {
-    // Frische Installation ohne WTF-Ordner, oder Fehler beim Lesen.
     invoke.mockImplementation((cmd: string) => {
-      if (cmd === "detect_command")
-        return Promise.resolve({ managed: ROOT, suggestions: [] });
+      if (cmd === "detect_command") return Promise.resolve({ managed: ROOT, suggestions: [] });
       if (cmd === "inspect_wow_exe_command") return Promise.resolve(EXE);
+      if (cmd === "client_state_command") return Promise.resolve("not-running");
+      if (cmd === "wow_settings_command") return Promise.resolve({ loads_outdated_addons: true });
       if (cmd === "list_characters_command") return Promise.reject(new Error("kein WTF"));
       if (cmd === "scan_addons_command") return Promise.resolve(SCAN);
       return Promise.resolve(null);
     });
     const wrapper = mount(App);
     await flushPromises();
+    await goTo(wrapper, "Addons");
     expect(wrapper.text()).toContain("pfQuest");
-    expect(wrapper.findAll("select").filter((s) => s.text().includes("Zinnober"))).toHaveLength(0);
+    expect(wrapper.text()).not.toContain("Charaktere");
   });
 
   it("zeigt den Scan-Fortschritt und blendet ihn danach aus", async () => {
@@ -411,9 +448,10 @@ describe("App – Charaktere und Fortschritt", () => {
     });
     let resolveScan: ((value: unknown) => void) | undefined;
     invoke.mockImplementation((cmd: string) => {
-      if (cmd === "detect_command")
-        return Promise.resolve({ managed: ROOT, suggestions: [] });
+      if (cmd === "detect_command") return Promise.resolve({ managed: ROOT, suggestions: [] });
       if (cmd === "inspect_wow_exe_command") return Promise.resolve(EXE);
+      if (cmd === "client_state_command") return Promise.resolve("not-running");
+      if (cmd === "wow_settings_command") return Promise.resolve({ loads_outdated_addons: true });
       if (cmd === "list_characters_command") return Promise.resolve([]);
       if (cmd === "scan_addons_command") return new Promise((r) => (resolveScan = r));
       return Promise.resolve(null);
@@ -421,11 +459,11 @@ describe("App – Charaktere und Fortschritt", () => {
 
     const wrapper = mount(App);
     await flushPromises();
+    await goTo(wrapper, "Addons");
 
     emit!({ payload: { done: 42, total: 242, current: "pfQuest" } });
     await flushPromises();
     expect(wrapper.text()).toContain("42 von 242");
-    expect(wrapper.text()).toContain("pfQuest");
     expect(wrapper.find("[role=progressbar]").attributes("aria-valuenow")).toBe("42");
 
     resolveScan!(SCAN);
@@ -434,11 +472,11 @@ describe("App – Charaktere und Fortschritt", () => {
   });
 
   it("scannt auch dann, wenn der Fortschritts-Listener scheitert", async () => {
-    // Der Balken bleibt dann unbestimmt — der Scan darf trotzdem nicht ausfallen.
     listen.mockRejectedValue(new Error("kein Event-System"));
     mockInvoke({ managed: ROOT, suggestions: [] }, { scan: SCAN });
     const wrapper = mount(App);
     await flushPromises();
+    await goTo(wrapper, "Addons");
     expect(wrapper.text()).toContain("pfQuest");
   });
 
@@ -450,8 +488,77 @@ describe("App – Charaktere und Fortschritt", () => {
     expect(unlisten).toHaveBeenCalled();
   });
 
+  it("prüft den laufenden Client periodisch nach", async () => {
+    // Der Client kann jederzeit gestartet werden, während die App offen ist.
+    vi.useFakeTimers();
+    mockInvoke({ managed: ROOT, suggestions: [] }, { scan: SCAN });
+    const wrapper = mount(App);
+    await flushPromises();
+    const before = invoke.mock.calls.filter((c) => c[0] === "client_state_command").length;
+
+    await vi.advanceTimersByTimeAsync(5000);
+    const after = invoke.mock.calls.filter((c) => c[0] === "client_state_command").length;
+    expect(after).toBeGreaterThan(before);
+
+    wrapper.unmount();
+    vi.useRealTimers();
+  });
+
+  it("warnt, wenn der Client aus dieser Installation läuft", async () => {
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === "detect_command") return Promise.resolve({ managed: ROOT, suggestions: [] });
+      if (cmd === "inspect_wow_exe_command") return Promise.resolve(EXE);
+      if (cmd === "client_state_command") return Promise.resolve("running-here");
+      if (cmd === "wow_settings_command") return Promise.resolve({ loads_outdated_addons: true });
+      if (cmd === "list_characters_command") return Promise.resolve([]);
+      if (cmd === "scan_addons_command") return Promise.resolve(SCAN);
+      return Promise.resolve(null);
+    });
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.text()).toContain("WoW läuft gerade");
+    expect(wrapper.text()).toContain("Mit Einschränkungen");
+  });
+
+  it("fällt bei unlesbaren Client-Einstellungen auf den Vorgabewert zurück", async () => {
+    // Vorgabewert heißt „lädt keine veralteten" — also werden sie ausgeblendet.
+    // Nichts versprechen, was der Client nicht hält.
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === "detect_command") return Promise.resolve({ managed: ROOT, suggestions: [] });
+      if (cmd === "inspect_wow_exe_command") return Promise.resolve(EXE);
+      if (cmd === "client_state_command") return Promise.resolve("not-running");
+      if (cmd === "wow_settings_command") return Promise.reject(new Error("Config.wtf kaputt"));
+      if (cmd === "list_characters_command") return Promise.resolve([]);
+      if (cmd === "scan_addons_command")
+        return Promise.resolve({
+          ...SCAN,
+          addons: [{ ...SCAN.addons[0], id: "Alt", title: "Alt", interface: "11000" }],
+        });
+      return Promise.resolve(null);
+    });
+    const wrapper = mount(App);
+    await flushPromises();
+    await goTo(wrapper, "Addons");
+    expect(wrapper.text()).toContain("ist hier ausgeblendet");
+  });
+
+  it("nimmt einen Fehler beim Client-Check als „läuft nicht“", async () => {
+    // Ein fehlgeschlagener Check darf keine Warnung erfinden.
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === "detect_command") return Promise.resolve({ managed: ROOT, suggestions: [] });
+      if (cmd === "inspect_wow_exe_command") return Promise.resolve(EXE);
+      if (cmd === "client_state_command") return Promise.reject(new Error("keine Prozessliste"));
+      if (cmd === "wow_settings_command") return Promise.resolve({ loads_outdated_addons: true });
+      if (cmd === "list_characters_command") return Promise.resolve([]);
+      if (cmd === "scan_addons_command") return Promise.resolve(SCAN);
+      return Promise.resolve(null);
+    });
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.text()).toContain("Alles in Ordnung");
+  });
+
   it("zeigt einen Hinweis, solange die Installation gesucht wird", async () => {
-    // Ohne ihn wirkte die App beim Start eingefroren.
     invoke.mockImplementation(() => new Promise(() => {}));
     const wrapper = mount(App);
     await flushPromises();
@@ -465,10 +572,8 @@ describe("App – Addon-Scan", () => {
     const wrapper = mount(App);
     await flushPromises();
 
-    expect(invoke).toHaveBeenCalledWith("scan_addons_command", {
-      root: "/games/WoW",
-      character: null,
-    });
+    expect(invoke).toHaveBeenCalledWith("scan_addons_command", { root: "/games/WoW" });
+    await goTo(wrapper, "Addons");
     expect(wrapper.text()).toContain("pfQuest");
     expect(wrapper.text()).toContain("7c1d90ffaa11");
   });
@@ -481,8 +586,8 @@ describe("App – Addon-Scan", () => {
 
     expect(invoke).not.toHaveBeenCalledWith("scan_addons_command", expect.anything());
     // Auf ein Element der Tabelle prüfen, nicht auf "Addons" — das steht auch
-    // im Untertitel und im AddOns-Marker der Installation.
-    expect(wrapper.text()).not.toContain("Nur Developer-Mode");
+    // im Menü, im Untertitel und im AddOns-Marker der Installation.
+    expect(wrapper.text()).not.toContain("Nur Git-Checkouts");
   });
 
   it("meldet einen fehlgeschlagenen Scan, ohne die WoW-Erkennung zu verwerfen", async () => {
@@ -490,8 +595,10 @@ describe("App – Addon-Scan", () => {
     const wrapper = mount(App);
     await flushPromises();
 
-    expect(wrapper.text()).toContain("Addon-Scan fehlgeschlagen");
-    // Die erkannte Installation bleibt sichtbar.
+    // Die erkannte Installation bleibt sichtbar …
     expect(wrapper.text()).toContain("/games/WoW");
+    // … und der Fehler steht in der Addon-Ansicht.
+    await goTo(wrapper, "Addons");
+    expect(wrapper.text()).toContain("Addon-Scan fehlgeschlagen");
   });
 });

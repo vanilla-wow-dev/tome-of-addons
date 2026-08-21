@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mount, config, type VueWrapper } from "@vue/test-utils";
 import { i18n, setLocale } from "./i18n";
-import type { Addon, AddonScan } from "./addons";
+import type { Addon, AddonScan, Character } from "./addons";
 import AddonTable from "./AddonTable.vue";
 
 config.global.plugins = [i18n];
@@ -19,7 +19,6 @@ function addon(overrides: Partial<Addon> = {}): Addon {
     tree_sha_short: "7c1d90ffaa11",
     mode: "consumer",
     default_state: "disabled",
-    enabled: null,
     file_count: 2310,
     size_bytes: 78_000_000,
     cached: false,
@@ -63,26 +62,32 @@ const SCAN: AddonScan = {
   hashed: 2,
 };
 
-const CHARACTERS = [
-  {
+function character(states: Record<string, boolean>): Character {
+  return {
     account: "RYLON8",
     realm: "NostalGeek 1.12",
     name: "Zinnober",
     path: "/wtf/Zinnober/AddOns.txt",
     label: "Zinnober · NostalGeek 1.12 (RYLON8)",
-  },
-];
+    states,
+  };
+}
 
 function mountTable(
   scan: AddonScan = SCAN,
-  opts: { clientInterface?: string | null; characters?: typeof CHARACTERS } = {},
+  opts: {
+    clientInterface?: string | null;
+    character?: Character | null;
+    /** Standard: wie der Client — veraltete werden nicht geladen. */
+    loadsOutdated?: boolean;
+  } = {},
 ) {
   return mount(AddonTable, {
     props: {
       scan,
-      characters: opts.characters ?? [],
       clientInterface: opts.clientInterface ?? null,
-      character: null,
+      character: opts.character ?? null,
+      loadsOutdated: opts.loadsOutdated ?? true,
     },
   });
 }
@@ -126,7 +131,7 @@ describe("AddonTable – Darstellung", () => {
     const wrapper = mountTable();
     expect(wrapper.text()).toContain("Git");
     expect(wrapper.text()).not.toContain("ZIP");
-    const modeCell = (row: number) => wrapper.findAll("tbody tr")[row].findAll("td")[5].text();
+    const modeCell = (row: number) => wrapper.findAll("tbody tr")[row].findAll("td")[4].text();
     expect(modeCell(0)).toBe("");
     expect(modeCell(1)).toBe("Git");
   });
@@ -143,9 +148,9 @@ describe("AddonTable – Sortierung", () => {
     // Bei „Dateien" und „Größe" ist „größte zuerst" die nützlichere Erwartung
     // als „14 Dateien zuerst" — TanStack macht das für Zahlen von sich aus.
     const wrapper = mountTable();
-    await wrapper.findAll("thead button")[6].trigger("click");
+    await wrapper.findAll("thead button")[5].trigger("click");
     expect(titles(wrapper)).toEqual(["pfQuest", "Invite-o-matik", "Accountant"]);
-    await wrapper.findAll("thead button")[6].trigger("click");
+    await wrapper.findAll("thead button")[5].trigger("click");
     expect(titles(wrapper)).toEqual(["Accountant", "Invite-o-matik", "pfQuest"]);
   });
 
@@ -278,8 +283,9 @@ describe("AddonTable – Interface-Version", () => {
       ...SCAN,
       addons: [addon({ id: "Alt", title: "Alt", interface: "11000" })],
     };
-    const wrapper = mountTable(scan, { clientInterface: "11200" });
-    // Ohne diesen Hinweis sucht der Nutzer den Fehler beim Addon.
+    // Ohne diesen Hinweis sucht der Nutzer den Fehler beim Addon — oder
+    // wundert sich, warum Einträge fehlen.
+    const wrapper = mountTable(scan, { clientInterface: "11200", loadsOutdated: true });
     expect(wrapper.text()).toContain("Veraltete AddOns laden");
     expect(wrapper.text()).toContain("11200");
   });
@@ -290,18 +296,42 @@ describe("AddonTable – Interface-Version", () => {
     expect(wrapper.text()).not.toContain("Veraltete AddOns laden");
   });
 
-  it("filtert auf veraltete Addons", async () => {
-    const scan: AddonScan = {
-      ...SCAN,
-      addons: [
-        addon({ id: "Aktuell", title: "Aktuell", interface: "11200" }),
-        addon({ id: "Alt", title: "Alt", interface: "11000" }),
-      ],
-    };
-    const wrapper = mountTable(scan, { clientInterface: "11200" });
+  const mixed: AddonScan = {
+    ...SCAN,
+    addons: [
+      addon({ id: "Aktuell", title: "Aktuell", interface: "11200" }),
+      addon({ id: "Alt", title: "Alt", interface: "11000" }),
+    ],
+  };
+
+  it("blendet veraltete aus, wenn der Client sie nicht lädt", () => {
+    // Die Liste spiegelt, was im Spiel ankommt: was der Client nicht lädt,
+    // existiert dort faktisch nicht.
+    const wrapper = mountTable(mixed, { clientInterface: "11200", loadsOutdated: false });
+    expect(titles(wrapper)).toEqual(["Aktuell"]);
+    expect(wrapper.text()).toContain("ist hier ausgeblendet");
+  });
+
+  it("zeigt veraltete mit, wenn der Client sie lädt", () => {
+    const wrapper = mountTable(mixed, { clientInterface: "11200", loadsOutdated: true });
+    expect(titles(wrapper)).toEqual(["Aktuell", "Alt"]);
+    expect(wrapper.text()).toContain("lädt es trotzdem");
+  });
+
+  it("holt ausgeblendete veraltete auf Wunsch zurück", async () => {
+    const wrapper = mountTable(mixed, { clientInterface: "11200", loadsOutdated: false });
     const checkbox = wrapper.findAll("input[type=checkbox]")[1];
+    expect((checkbox.element as HTMLInputElement).checked).toBe(false);
     await checkbox.setValue(true);
-    expect(titles(wrapper)).toEqual(["Alt"]);
+    expect(titles(wrapper)).toEqual(["Aktuell", "Alt"]);
+  });
+
+  it("lässt sie auf Wunsch auch wieder verschwinden", async () => {
+    const wrapper = mountTable(mixed, { clientInterface: "11200", loadsOutdated: true });
+    const checkbox = wrapper.findAll("input[type=checkbox]")[1];
+    expect((checkbox.element as HTMLInputElement).checked).toBe(true);
+    await checkbox.setValue(false);
+    expect(titles(wrapper)).toEqual(["Aktuell"]);
   });
 });
 
@@ -309,46 +339,67 @@ describe("AddonTable – Aktiv-Zustand", () => {
   const scan: AddonScan = {
     ...SCAN,
     addons: [
-      addon({ id: "An", title: "An", enabled: true }),
-      addon({ id: "Aus", title: "Aus", enabled: false }),
-      addon({ id: "Ungesehen", title: "Ungesehen", enabled: null }),
+      addon({ id: "An", title: "An" }),
+      addon({ id: "Aus", title: "Aus" }),
+      addon({ id: "Ungesehen", title: "Ungesehen" }),
     ],
   };
+  // Schlüssel kleingeschrieben, wie AddOns.txt sie liefert.
+  const zinnober = character({ an: true, aus: false });
 
-  it("unterscheidet aktiv, aus und nie gesehen", () => {
+  it("zeigt ohne Charakter gar keine Aktiv-Spalte", () => {
+    // In der reinen Addon-Ansicht gibt es keinen Charakter-Bezug — eine Spalte
+    // voller Striche wäre nur Rauschen.
     const wrapper = mountTable(scan);
-    const cell = (row: number) => wrapper.findAll("tbody tr")[row].findAll("td")[4].text();
-    expect(cell(0)).toBe("aktiv");
-    expect(cell(1)).toBe("aus");
-    // „Nie gesehen" ist etwas anderes als „abgeschaltet".
-    expect(cell(2)).toBe("—");
+    const headers = wrapper.findAll("thead th").map((h) => h.text());
+    expect(headers.some((h) => h.includes("Aktiv"))).toBe(false);
+    expect(wrapper.findAll("tbody tr")[0].findAll("td")).toHaveLength(7);
   });
 
-  it("sortiert nie-gesehen zwischen aus und aktiv", async () => {
-    // Erster Klick absteigend (Zahlenspalte) — hier die nützlichere Vorgabe:
-    // „was ist aktiv" zuerst. Entscheidend ist die Mitte: nie gesehen liegt
-    // zwischen aus und aktiv, statt mit einem von beiden zu verschmelzen.
-    const wrapper = mountTable(scan);
-    await wrapper.findAll("thead button")[4].trigger("click");
+  it("unterscheidet mit Charakter aktiv, aus und nie gesehen", () => {
+    const wrapper = mountTable(scan, { character: zinnober });
+    const cell = (row: number) => wrapper.findAll("tbody tr")[row].findAll("td")[3].text();
+    expect(cell(0)).toBe("aktiv");
+    // „Nie gesehen" ist etwas anderes als „abgeschaltet".
+    expect(cell(1)).toBe("—");
+    expect(cell(2)).toBe("aus");
+  });
+
+  it("lässt Hash, Modus und Dateizahl weg — die zählen hier nicht", () => {
+    const wrapper = mountTable(scan, { character: zinnober });
+    const headers = wrapper.findAll("thead th").map((h) => h.text());
+    expect(headers.some((h) => h.includes("Hash"))).toBe(false);
+    expect(headers.some((h) => h.includes("Modus"))).toBe(false);
+    expect(headers.some((h) => h.includes("Dateien"))).toBe(false);
+    // Addon, Version, Interface, Aktiv, Größe
+    expect(wrapper.findAll("tbody tr")[0].findAll("td")).toHaveLength(5);
+  });
+
+  it("hält das Weggelassene im Detailbereich bereit", async () => {
+    const wrapper = mountTable(scan, { character: zinnober });
+    await wrapper.findAll("tbody tr")[0].find("td button").trigger("click");
+    const detail = wrapper.findAll("tbody tr")[1].text();
+    expect(detail).toContain("Modus");
+    expect(detail).toContain("Dateien");
+    expect(detail).toContain("Tree-Hash");
+  });
+
+  it("sortiert beim Charakter von sich aus nach Aktiv, dann alphabetisch", async () => {
+    // Die Frage der Ansicht lautet „was lädt dieser Charakter?" — das soll
+    // ohne einen einzigen Klick beantwortet sein.
+    const wrapper = mountTable(scan, { character: zinnober });
     expect(titles(wrapper)).toEqual(["An", "Ungesehen", "Aus"]);
-    await wrapper.findAll("thead button")[4].trigger("click");
+    // Und „nie gesehen" liegt zwischen aktiv und aus, statt zu verschmelzen.
+    await wrapper.findAll("thead button")[3].trigger("click");
     expect(titles(wrapper)).toEqual(["Aus", "Ungesehen", "An"]);
   });
 
-  it("bietet die Charakter-Auswahl nur an, wenn es Charaktere gibt", async () => {
-    expect(mountTable(scan).findAll("select")).toHaveLength(0);
-
-    const wrapper = mountTable(scan, { characters: CHARACTERS });
-    const select = wrapper.find("select");
-    expect(select.text()).toContain("Zinnober · NostalGeek 1.12 (RYLON8)");
-
-    await select.setValue("/wtf/Zinnober/AddOns.txt");
-    const emitted = wrapper.emitted("update:character") ?? [];
-    expect(emitted[emitted.length - 1]).toEqual(["/wtf/Zinnober/AddOns.txt"]);
+  it("sortiert ohne Charakter weiterhin alphabetisch", () => {
+    expect(titles(mountTable(scan))).toEqual(["An", "Aus", "Ungesehen"]);
   });
 
   it("zeigt DefaultState im Detail, getrennt vom echten Zustand", async () => {
-    const wrapper = mountTable(scan);
+    const wrapper = mountTable(scan, { character: zinnober });
     await wrapper.findAll("tbody tr")[0].find("td button").trigger("click");
     const detail = wrapper.findAll("tbody tr")[1].text();
     expect(detail).toContain("DefaultState");
@@ -468,6 +519,13 @@ describe("AddonTable – übersprungene Ordner", () => {
       ],
     });
     expect(many.text()).toContain("2 folders skipped");
+  });
+
+  it("erscheint nicht in der Charakter-Ansicht", () => {
+    // Welcher Ordner kein gültiges .toc hat, ist eine Eigenschaft der
+    // Installation, nicht eines Charakters.
+    const wrapper = mountTable(SCAN, { character: character({}) });
+    expect(wrapper.text()).not.toContain("übersprungen");
   });
 
   it("blendet den Abschnitt aus, wenn nichts übersprungen wurde", () => {

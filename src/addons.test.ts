@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
+  activeCount,
+  installationHealth,
+  stateFor,
   countOutdated,
   interfaceStatus,
   cacheRatio,
@@ -24,7 +27,6 @@ function addon(overrides: Partial<Addon> = {}): Addon {
     tree_sha_short: "7c1d90ffaa11",
     mode: "consumer",
     default_state: "disabled",
-    enabled: null,
     file_count: 2310,
     size_bytes: 78_000_000,
     cached: false,
@@ -153,5 +155,109 @@ describe("countOutdated", () => {
 
   it("zählt nichts ohne bekannte Client-Version", () => {
     expect(countOutdated([addon({ interface: "11000" })], null)).toBe(0);
+  });
+});
+
+describe("installationHealth", () => {
+  const root = (has_addons: boolean) => ({
+    path: "/games/WoW",
+    has_exe: true,
+    has_mpq: true,
+    has_interface: true,
+    has_addons,
+    method: "walkup",
+  });
+  const exe = (status: string) =>
+    ({
+      path: "/games/WoW/WoW.exe",
+      size_bytes: 1,
+      build: 5875,
+      build_date: null,
+      sha1: "a",
+      md5: "b",
+      identity: { status } as never,
+      interface_version: "11200",
+    }) as never;
+
+  it("ist rot ohne verwaltete Installation", () => {
+    const verdict = installationHealth(null, null, "not-running");
+    expect(verdict.level).toBe("error");
+    expect(verdict.reasons).toEqual(["health.notManaged"]);
+  });
+
+  it("ist grün, wenn nichts dagegen spricht", () => {
+    const verdict = installationHealth(root(true), exe("official"), "not-running");
+    expect(verdict.level).toBe("ok");
+    expect(verdict.reasons).toEqual([]);
+  });
+
+  it("warnt, solange der Client läuft", () => {
+    // WoW schreibt SavedVariables beim Beenden zurück — Änderungen währenddessen
+    // gehen verloren.
+    expect(installationHealth(root(true), exe("official"), "running-here")).toEqual({
+      level: "warn",
+      reasons: ["health.clientRunningHere"],
+    });
+    expect(installationHealth(root(true), exe("official"), "running-unknown")).toEqual({
+      level: "warn",
+      reasons: ["health.clientRunningUnknown"],
+    });
+  });
+
+  it("warnt bei fehlendem AddOns-Ordner", () => {
+    expect(installationHealth(root(false), exe("official"), "not-running").reasons).toEqual([
+      "health.noAddonsFolder",
+    ]);
+  });
+
+  it("warnt bei jeder nicht-offiziellen Exe", () => {
+    for (const status of ["modified", "unknown-build", "unknown"]) {
+      expect(installationHealth(root(true), exe(status), "not-running").reasons).toEqual([
+        `health.exe.${status}`,
+      ]);
+    }
+  });
+
+  it("nennt mehrere Gründe zugleich", () => {
+    const verdict = installationHealth(root(false), exe("modified"), "running-here");
+    expect(verdict.level).toBe("warn");
+    expect(verdict.reasons).toEqual([
+      "health.clientRunningHere",
+      "health.noAddonsFolder",
+      "health.exe.modified",
+    ]);
+  });
+
+  it("urteilt ohne Exe-Analyse nicht über die Exe", () => {
+    expect(installationHealth(root(true), null, "not-running").level).toBe("ok");
+  });
+});
+
+describe("activeCount / stateFor", () => {
+  const chr = (states: Record<string, boolean>) => ({
+    account: "A",
+    realm: "R",
+    name: "C",
+    path: "/p",
+    label: "C · R (A)",
+    states,
+  });
+
+  it("zählt nur installierte Addons", () => {
+    // AddOns.txt führt gelöschte Addons weiter — sonst stünde in der
+    // Seitenleiste eine Zahl, die zu keiner Liste passt.
+    const addons = [addon({ id: "pfQuest" }), addon({ id: "Atlas" })];
+    expect(activeCount(chr({ pfquest: true, geloescht: true }), addons)).toBe(1);
+  });
+
+  it("zählt abgeschaltete nicht mit", () => {
+    expect(activeCount(chr({ pfquest: false }), [addon({ id: "pfQuest" })])).toBe(0);
+  });
+
+  it("unterscheidet nie gesehen von abgeschaltet", () => {
+    const character = chr({ pfquest: false });
+    expect(stateFor(character, addon({ id: "pfQuest" }))).toBe(false);
+    expect(stateFor(character, addon({ id: "Unbekannt" }))).toBeNull();
+    expect(stateFor(null, addon({ id: "pfQuest" }))).toBeNull();
   });
 });

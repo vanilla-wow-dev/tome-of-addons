@@ -47,7 +47,7 @@ const markers = computed(() => [
 </script>
 
 <template>
-  <div class="tome-panel mb-3 px-4 py-3">
+  <div class="tome-inset mb-3 px-4 py-3">
     <code class="tome-data block break-all">{{ root.path }}</code>
     <span class="font-display mt-1 inline-block text-[0.65rem] tracking-[0.15em] uppercase opacity-60">
       {{ root.method }}

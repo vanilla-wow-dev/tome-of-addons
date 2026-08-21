@@ -12,9 +12,10 @@ use std::path::{Path, PathBuf};
 use tauri::{Emitter, Manager};
 
 use crate::addons::{scan_with, HashCache, Scan};
+use crate::client::{state as client_state, ClientState};
 use crate::exe::{inspect_wow_exe, WowExeInfo};
 use crate::wow::{addons_dir, detect, Detection};
-use crate::wtf::{list_characters, read_states, Character};
+use crate::wtf::{list_characters, read_settings, Character, Settings};
 
 /// Erkennt die zu verwaltende Installation (Walk-up) + Vorschläge (Registry).
 #[tauri::command]
@@ -60,6 +61,21 @@ fn cache_path(app: &tauri::AppHandle, root: &Path) -> Result<PathBuf, String> {
         .join(format!("{}.json", &key[..16])))
 }
 
+/// Prüft, ob gerade ein WoW-Client aus dieser Installation läuft.
+///
+/// Bewusst ein eigener Befehl statt Teil der Erkennung: der Zustand ändert
+/// sich, während die App offen ist, und die Oberfläche fragt ihn periodisch neu ab.
+#[tauri::command]
+pub fn client_state_command(root: String) -> ClientState {
+    client_state(Path::new(&root))
+}
+
+/// Liest die Addon-relevanten Client-Einstellungen aus `WTF/Config.wtf`.
+#[tauri::command]
+pub fn wow_settings_command(root: String) -> Settings {
+    read_settings(Path::new(&root))
+}
+
 /// Listet alle Charaktere mit eigener Addon-Auswahl.
 #[tauri::command]
 pub fn list_characters_command(root: String) -> Vec<Character> {
@@ -68,30 +84,17 @@ pub fn list_characters_command(root: String) -> Vec<Character> {
 
 /// Scannt `Interface/AddOns/` des angegebenen WoW-Roots.
 ///
-/// `character` ist der Pfad zur `AddOns.txt` eines Charakters; fehlt er, bleibt
-/// der Aktiv-Zustand unbekannt. Der Fortschritt wird als `addon-scan-progress`
-/// gesendet, damit die Oberfläche beim ersten Scan nicht einfriert.
+/// Der Fortschritt wird als `addon-scan-progress` gesendet, damit die
+/// Oberfläche beim ersten Scan nicht einfriert.
 #[tauri::command]
-pub fn scan_addons_command(
-    app: tauri::AppHandle,
-    root: String,
-    character: Option<String>,
-) -> Result<Scan, String> {
+pub fn scan_addons_command(app: tauri::AppHandle, root: String) -> Result<Scan, String> {
     let root = Path::new(&root);
     let dir =
         addons_dir(root).ok_or_else(|| format!("Kein Interface/AddOns in {}", root.display()))?;
 
-    // Ein unlesbarer WTF-Ordner darf den Scan nicht verhindern — dann ist der
-    // Aktiv-Zustand eben unbekannt.
-    let states = character
-        .as_deref()
-        .map(Path::new)
-        .and_then(|path| read_states(path).ok())
-        .unwrap_or_default();
-
     let path = cache_path(&app, root)?;
     let mut cache = HashCache::load(&path);
-    let result = scan_with(&dir, &mut cache, &states, &|done, total, id| {
+    let result = scan_with(&dir, &mut cache, &|done, total, id| {
         let _ = app.emit(
             "addon-scan-progress",
             ScanProgress {

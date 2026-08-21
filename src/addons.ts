@@ -1,6 +1,8 @@
 // Typen + reine Helfer rund um den Addon-Scan.
 // Bewusst frei von Vue/Tauri-Abhängigkeiten, damit isoliert testbar.
 
+import type { WowExeInfo, WowRoot } from "./wow";
+
 export type AddonMode = "consumer" | "developer";
 
 export interface Addon {
@@ -16,8 +18,6 @@ export interface Addon {
   mode: AddonMode;
   /** `## DefaultState` aus der .toc — nur der Anfangszustand, nicht der aktuelle. */
   default_state: string | null;
-  /** Tatsächlicher Zustand laut AddOns.txt des gewählten Charakters. */
-  enabled: boolean | null;
   file_count: number;
   size_bytes: number;
   cached: boolean;
@@ -31,6 +31,69 @@ export interface Character {
   path: string;
   /** Fertige Anzeigeform „Charakter · Realm (Account)", vom Backend gesetzt. */
   label: string;
+  /** Addon-Zustände dieses Charakters, Schlüssel kleingeschrieben. */
+  states: Record<string, boolean>;
+}
+
+/** Addon-relevante Client-Einstellungen aus WTF/Config.wtf. */
+export interface WowSettings {
+  /** Lädt der Client Addons mit abweichender Interface-Version? */
+  loads_outdated_addons: boolean;
+}
+
+/** Läuft gerade ein WoW-Client aus dieser Installation? */
+export type ClientState = "not-running" | "running-here" | "running-unknown";
+
+/** Ampel-Zustand der Installation. */
+export type Health = "ok" | "warn" | "error";
+
+export interface HealthVerdict {
+  level: Health;
+  /** i18n-Schlüssel der Gründe, in der Reihenfolge ihrer Schwere. */
+  reasons: string[];
+}
+
+/**
+ * Bewertet die verwaltete Installation für den Statuspunkt in der Seitenleiste.
+ *
+ * Ein laufender Client zählt als Warnung, obwohl er kein Defekt ist: WoW
+ * schreibt die SavedVariables beim Beenden zurück und überschreibt damit alles,
+ * was der Manager währenddessen ändert — und neue Addons sieht der Client erst
+ * nach einem Neustart. Wer das nicht weiß, wundert sich über verschwundene
+ * Änderungen.
+ */
+export function installationHealth(
+  managed: WowRoot | null,
+  exe: WowExeInfo | null | undefined,
+  client: ClientState,
+): HealthVerdict {
+  if (!managed) return { level: "error", reasons: ["health.notManaged"] };
+
+  const reasons: string[] = [];
+  if (client === "running-here") reasons.push("health.clientRunningHere");
+  else if (client === "running-unknown") reasons.push("health.clientRunningUnknown");
+  if (!managed.has_addons) reasons.push("health.noAddonsFolder");
+  if (exe && exe.identity.status !== "official") reasons.push(`health.exe.${exe.identity.status}`);
+
+  return { level: reasons.length ? "warn" : "ok", reasons };
+}
+
+/**
+ * Zählt die für einen Charakter aktiven Addons — aber nur solche, die auch
+ * wirklich installiert sind.
+ *
+ * `AddOns.txt` führt Einträge weiter, deren Ordner längst gelöscht ist; ohne
+ * diesen Abgleich stünde in der Seitenleiste eine Zahl, die zu keiner Liste passt.
+ */
+export function activeCount(character: Character, addons: Addon[]): number {
+  return addons.filter((addon) => character.states[addon.id.toLowerCase()] === true).length;
+}
+
+/** Zustand eines Addons für einen Charakter; `null` = dem Client nie begegnet. */
+export function stateFor(character: Character | null, addon: Addon): boolean | null {
+  if (!character) return null;
+  const value = character.states[addon.id.toLowerCase()];
+  return value === undefined ? null : value;
 }
 
 export interface ScanProgress {

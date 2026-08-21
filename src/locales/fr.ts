@@ -2,6 +2,31 @@
 export default {
   tagline: "Le répertoire organisé des addons WoW 1.12.1.",
   language: "Langue",
+  nav: {
+    label: "Sections",
+    wow: "État de WoW",
+    addons: "Extensions",
+    characters: "Personnages",
+    health: { ok: "Tout va bien", warn: "Avec réserves", error: "Aucune installation" },
+  },
+  health: {
+    notManaged: "Tome of Addons n’est pas dans un dossier WoW et ne gère aucune installation.",
+    clientRunningHere:
+      "WoW est en cours d’exécution. Les modifications des SavedVariables seront écrasées à la fermeture, et les extensions nouvellement installées ne seront prises en compte qu’après un redémarrage.",
+    clientRunningUnknown:
+      "Un processus WoW est actif mais n’a pu être rattaché à aucune installation. S’il s’agit de celle-ci, des modifications peuvent être perdues.",
+    noAddonsFolder: "Aucun dossier Interface/AddOns — rien ne peut encore être installé.",
+    exe: {
+      modified: "WoW.exe est modifié (l’empreinte diffère de l’officielle).",
+      "unknown-build": "Build inconnu — aucune empreinte de référence officielle.",
+      unknown: "Client WoW non reconnaissable.",
+    },
+  },
+  character: {
+    tally: "{on} actives · {off} inactives · {unseen} jamais vues",
+    activeButOutdated:
+      "{n} extension active est obsolète et ne sera pas chargée malgré la case cochée. | {n} extensions actives sont obsolètes et ne seront pas chargées malgré la case cochée.",
+  },
   wow: {
     searching: "Recherche d’une installation WoW…",
     managed: "Géré",
@@ -32,9 +57,11 @@ export default {
     title: "Extensions",
     search: "Rechercher (nom, auteur, empreinte, chemin)…",
     developerOnly: "Dépôts Git uniquement",
-    outdatedOnly: "Obsolètes uniquement ({n})",
-    outdatedHint:
-      "{n} extension déclare une version d’interface différente de celle de votre client ({client}). WoW ne la charge que si « Charger les AddOns obsolètes » est activé. | {n} extensions déclarent une version d’interface différente de celle de votre client ({client}). WoW ne les charge que si « Charger les AddOns obsolètes » est activé.",
+    showOutdated: "Afficher aussi les obsolètes ({n})",
+    outdatedHidden:
+      "{n} extension est obsolète ({client} attendu) et votre client ne la chargera pas — elle est masquée ici. | {n} extensions sont obsolètes ({client} attendu) et votre client ne les chargera pas — elles sont masquées ici.",
+    outdatedLoaded:
+      "{n} extension est obsolète ({client} attendu). Votre client la charge quand même car « Charger les AddOns obsolètes » est activé. | {n} extensions sont obsolètes ({client} attendu). Votre client les charge quand même car « Charger les AddOns obsolètes » est activé.",
     outdatedTitle: "Obsolète — le client attend {client}",
     character: "Personnage",
     noCharacter: "— aucun —",

@@ -150,6 +150,9 @@ tome-of-addons/                # Repo-Slug auf GitHub
 ├── src/                       # Vue-Frontend
 │   ├── style.css              # Tailwind-Theme: Tokens, Pergament, Rahmen
 │   ├── assets/fonts/          # Cinzel + EB Garamond (SIL OFL 1.1, lokal)
+│   ├── SideBar.vue            # Navigation: Zustand, Addons, Charaktere
+│   ├── WowView.vue            # Installations-Zustand mit Ampel
+│   ├── CharacterView.vue      # Addon-Zustand eines Charakters
 │   ├── AddonTable.vue         # Addon-Liste: Sortierung, Suche, Details
 │   ├── addons.ts              # Typen + reine Helfer zum Scan
 │   ├── App.vue                # Version, WoW-Erkennung, Update-Flow
@@ -160,6 +163,8 @@ tome-of-addons/                # Repo-Slug auf GitHub
 │   ├── src/lib.rs             # Tauri-Builder, Plugins registriert
 │   ├── src/commands.rs        # IPC-Wrapper
 │   ├── src/addons.rs          # Scanner für Interface/AddOns + Hash-Cache
+│   ├── src/wtf.rs             # Charaktere + Aktiv-Zustand aus AddOns.txt
+│   ├── src/client.rs          # Läuft gerade ein WoW-Client?
 │   ├── src/wow.rs             # WoW-Root-Erkennung (Walk-up + Registry)
 │   ├── src/exe.rs             # WoW.exe-Analyse (Version/Build)
 │   ├── src/relocate.rs        # Manager in WoW-Ordner verschieben

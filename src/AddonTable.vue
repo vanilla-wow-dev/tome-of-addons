@@ -7,6 +7,7 @@ import {
   getExpandedRowModel,
   getSortedRowModel,
   useVueTable,
+  type ColumnDef,
   type ExpandedState,
   type SortingState,
 } from "@tanstack/vue-table";
@@ -17,6 +18,7 @@ import {
   interfaceStatus,
   matchesQuery,
   shortHash,
+  stateFor,
   type Addon,
   type AddonScan,
   type Character,
@@ -25,18 +27,50 @@ import { fmtBytes } from "./wow";
 
 const props = defineProps<{
   scan: AddonScan;
-  characters: Character[];
   /** Interface-Version des Clients, Bezugswert für die Veraltet-Erkennung. */
   clientInterface: string | null;
+  /**
+   * Charakter, dessen Aktiv-Zustand gezeigt wird. `null` in der reinen
+   * Addon-Ansicht — dort gibt es keinen Charakter-Bezug und damit auch keine
+   * Aktiv-Spalte, statt eine Spalte voller Striche zu zeigen.
+   */
+  character?: Character | null;
+  /**
+   * Lädt der Client veraltete Addons? Bestimmt, ob sie hier von vornherein
+   * mitgezeigt werden — die Liste soll spiegeln, was im Spiel ankommt.
+   */
+  loadsOutdated: boolean;
 }>();
-/** Pfad zur AddOns.txt des gewählten Charakters, `null` = keiner gewählt. */
-const character = defineModel<string | null>("character", { required: true });
 const { t } = useI18n();
+
+/**
+ * Spalten werden einmalig beim Aufbau festgelegt, nicht reaktiv: die Ansicht
+ * wird beim Wechsel ohnehin neu aufgebaut (`:key`), und eine wechselnde
+ * Spaltenzahl in einer laufenden Tabelle wäre eine Fehlerquelle ohne Nutzen.
+ */
+const withState = props.character != null;
 
 const query = ref("");
 const developerOnly = ref(false);
-const outdatedOnly = ref(false);
-const sorting = ref<SortingState>([{ id: "title", desc: false }]);
+/**
+ * Veraltete Addons werden dem Client nachempfunden: lädt er sie nicht, sind
+ * sie hier zunächst ausgeblendet, denn im Spiel existieren sie faktisch nicht.
+ * Das Häkchen holt sie zurück.
+ */
+const showOutdated = ref(props.loadsOutdated);
+/**
+ * Beim Charakter gibt der Aktiv-Zustand die Reihenfolge vor: aktiv zuerst,
+ * innerhalb dessen alphabetisch. Das beantwortet die eigentliche Frage der
+ * Ansicht („was lädt dieser Charakter?") ohne einen einzigen Klick.
+ */
+const sorting = ref<SortingState>(
+  props.character
+    ? [
+        { id: "enabled", desc: true },
+        { id: "title", desc: false },
+      ]
+    : [{ id: "title", desc: false }],
+);
 const expanded = ref<ExpandedState>({});
 const showSkipped = ref(false);
 const copied = ref<string | null>(null);
@@ -51,7 +85,7 @@ const rows = computed(() =>
   props.scan.addons.filter(
     (addon) =>
       (!developerOnly.value || addon.mode === "developer") &&
-      (!outdatedOnly.value || interfaceStatus(addon, props.clientInterface) === "outdated") &&
+      (showOutdated.value || interfaceStatus(addon, props.clientInterface) !== "outdated") &&
       matchesQuery(addon, query.value),
   ),
 );
@@ -59,23 +93,48 @@ const rows = computed(() =>
 const outdatedCount = computed(() => countOutdated(props.scan.addons, props.clientInterface));
 
 const columnHelper = createColumnHelper<Addon>();
-const columns = [
-  columnHelper.accessor("title", {
-    id: "title",
-    sortingFn: (a, b) => compareTitles(a.original, b.original),
-  }),
-  columnHelper.accessor((addon) => addon.version ?? "", { id: "version" }),
-  columnHelper.accessor((addon) => addon.interface ?? "", { id: "interface" }),
-  columnHelper.accessor((addon) => addon.tree_sha_short ?? "", { id: "hash" }),
-  // Unbekannt sortiert zwischen aktiv und inaktiv, statt mit einem der beiden
-  // zu verschmelzen — „nie gesehen" ist etwas anderes als „abgeschaltet".
-  columnHelper.accessor((addon) => (addon.enabled === null ? 1 : addon.enabled ? 2 : 0), {
-    id: "enabled",
-  }),
-  columnHelper.accessor("mode", { id: "mode" }),
-  columnHelper.accessor("file_count", { id: "files" }),
-  columnHelper.accessor("size_bytes", { id: "size" }),
-];
+
+// Unbekannt sortiert zwischen aktiv und inaktiv, statt mit einem der beiden zu
+// verschmelzen — „nie gesehen" ist etwas anderes als „abgeschaltet".
+const stateColumn = columnHelper.accessor(
+  (addon) => {
+    const state = stateFor(props.character ?? null, addon);
+    return state === null ? 1 : state ? 2 : 0;
+  },
+  { id: "enabled" },
+);
+
+const titleColumn = columnHelper.accessor("title", {
+  id: "title",
+  sortingFn: (a, b) => compareTitles(a.original, b.original),
+});
+const versionColumn = columnHelper.accessor((addon) => addon.version ?? "", { id: "version" });
+const interfaceColumn = columnHelper.accessor((addon) => addon.interface ?? "", {
+  id: "interface",
+});
+const sizeColumn = columnHelper.accessor("size_bytes", { id: "size" });
+
+/**
+ * In der Charakter-Ansicht zählt, ob ein Addon geladen wird — nicht seine
+ * Identität. Hash, Modus und Dateizahl wandern deshalb dort in den
+ * Detailbereich, statt Spalten zu belegen.
+ */
+const columns = (
+  withState
+    ? [titleColumn, versionColumn, interfaceColumn, stateColumn, sizeColumn]
+    : [
+        titleColumn,
+        versionColumn,
+        interfaceColumn,
+        columnHelper.accessor((addon) => addon.tree_sha_short ?? "", { id: "hash" }),
+        columnHelper.accessor("mode", { id: "mode" }),
+        columnHelper.accessor("file_count", { id: "files" }),
+        sizeColumn,
+      ]
+) as ColumnDef<Addon, unknown>[];
+
+/** Anzahl der Spalten — für `colspan` der Detail- und Leerzeile. */
+const columnCount = columns.length;
 
 /** Spalten, deren Werte Zahlen sind, werden rechtsbündig gesetzt. */
 const NUMERIC = new Set(["files", "size"]);
@@ -123,10 +182,8 @@ async function copyHash(addon: Addon) {
 </script>
 
 <template>
-  <section class="tome-panel mt-8 p-5">
-    <h2 class="tome-heading mb-4">{{ t("addons.title") }}</h2>
-
-    <div class="mb-4 flex flex-wrap items-center gap-4">
+  <section class="flex min-h-0 flex-col">
+    <div class="mb-4 flex shrink-0 flex-wrap items-center gap-4">
       <input
         v-model="query"
         type="search"
@@ -134,15 +191,6 @@ async function copyHash(addon: Addon) {
         :placeholder="t('addons.search')"
         :aria-label="t('addons.search')"
       />
-      <label v-if="props.characters.length" class="flex items-center gap-2 text-sm">
-        <span class="opacity-70">{{ t("addons.character") }}</span>
-        <select v-model="character" class="tome-input text-sm">
-          <option :value="null">{{ t("addons.noCharacter") }}</option>
-          <option v-for="c in props.characters" :key="c.path" :value="c.path">
-            {{ c.label }}
-          </option>
-        </select>
-      </label>
       <label class="flex cursor-pointer items-center gap-2 text-sm">
         <input v-model="developerOnly" type="checkbox" class="accent-gold-700" />
         {{ t("addons.developerOnly") }}
@@ -151,27 +199,34 @@ async function copyHash(addon: Addon) {
         v-if="outdatedCount"
         class="text-verdict-warn dark:text-verdict-warn-dark flex cursor-pointer items-center gap-2 text-sm"
       >
-        <input v-model="outdatedOnly" type="checkbox" class="accent-gold-700" />
-        {{ t("addons.outdatedOnly", { n: outdatedCount }) }}
+        <input v-model="showOutdated" type="checkbox" class="accent-gold-700" />
+        {{ t("addons.showOutdated", { n: outdatedCount }) }}
       </label>
       <p class="tome-data ml-auto opacity-70">
         {{ t("addons.count", { shown: rows.length, total: props.scan.addons.length }) }}
       </p>
     </div>
 
-    <!-- Der Client lädt veraltete Addons nur mit dem entsprechenden Haken im
-         AddOn-Fenster. Ohne diesen Hinweis sucht der Nutzer den Fehler beim
-         Addon statt bei der Interface-Version. -->
+    <!-- Ohne diesen Hinweis sucht der Nutzer den Fehler beim Addon statt bei
+         der Interface-Version — und wüsste nicht, warum Einträge fehlen. -->
     <p
       v-if="outdatedCount"
-      class="text-verdict-warn dark:text-verdict-warn-dark mb-4 text-sm"
+      class="text-verdict-warn dark:text-verdict-warn-dark mb-4 shrink-0 text-sm"
     >
-      {{ t("addons.outdatedHint", { n: outdatedCount, client: props.clientInterface }, outdatedCount) }}
+      {{
+        t(
+          props.loadsOutdated ? "addons.outdatedLoaded" : "addons.outdatedHidden",
+          { n: outdatedCount, client: props.clientInterface },
+          outdatedCount,
+        )
+      }}
     </p>
 
-    <div class="overflow-x-auto">
+    <!-- Nur der Rumpf blättert; der Spaltenkopf klebt oben, sonst weiß man bei
+         242 Zeilen nach dem ersten Bildschirm nicht mehr, welche Spalte was ist. -->
+    <div class="tome-scroll min-h-0 flex-1">
       <table class="w-full border-collapse text-left">
-        <thead>
+        <thead class="tome-sticky-head">
           <tr class="border-b border-gold-700/50">
             <th
               v-for="header in table.getHeaderGroups()[0].headers"
@@ -256,26 +311,21 @@ async function copyHash(addon: Addon) {
                 >
                 <span v-else class="tome-data opacity-50">—</span>
               </td>
-              <td class="tome-data py-1.5 pr-3">{{ shortHash(row.original) }}</td>
-              <td class="py-1.5 pr-3">
+              <td v-if="withState" class="py-1.5 pr-3">
                 <span
-                  v-if="row.original.enabled === true"
+                  v-if="stateFor(props.character ?? null, row.original) === true"
                   class="tome-badge text-verdict-ok dark:text-verdict-ok-dark"
                   >{{ t("addons.enabled") }}</span
                 >
                 <span
-                  v-else-if="row.original.enabled === false"
+                  v-else-if="stateFor(props.character ?? null, row.original) === false"
                   class="tome-badge opacity-50"
                   >{{ t("addons.disabled") }}</span
                 >
-                <span
-                  v-else
-                  class="tome-data opacity-40"
-                  :title="t('addons.unseenTitle')"
-                  >—</span
-                >
+                <span v-else class="tome-data opacity-40" :title="t('addons.unseenTitle')">—</span>
               </td>
-              <td class="py-1.5 pr-3">
+              <td v-if="!withState" class="tome-data py-1.5 pr-3">{{ shortHash(row.original) }}</td>
+              <td v-if="!withState" class="py-1.5 pr-3">
                 <!-- Nur die Ausnahme benennen: „Git-Checkout". Ob die übrigen
                      Dateien aus einem ZIP, von Hand oder von einem anderen
                      Manager stammen, wissen wir nicht — „ZIP" wäre erfunden. -->
@@ -285,14 +335,14 @@ async function copyHash(addon: Addon) {
                   >{{ t("addons.mode.developer") }}</span
                 >
               </td>
-              <td class="tome-data py-1.5 pr-3 text-right">
+              <td v-if="!withState" class="tome-data py-1.5 pr-3 text-right">
                 {{ fmtCount(row.original.file_count) }}
               </td>
               <td class="tome-data py-1.5 text-right">{{ fmtBytes(row.original.size_bytes) }}</td>
             </tr>
 
             <tr v-if="row.getIsExpanded()" class="border-b border-ink-500/15">
-              <td colspan="8" class="bg-gold-500/5 px-6 py-3">
+              <td :colspan="columnCount" class="bg-gold-500/5 px-6 py-3">
                 <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
                   <dt class="opacity-60">{{ t("addons.detail.author") }}</dt>
                   <dd>{{ row.original.author ?? "—" }}</dd>
@@ -312,6 +362,18 @@ async function copyHash(addon: Addon) {
 
                   <dt class="opacity-60">{{ t("addons.detail.notes") }}</dt>
                   <dd>{{ row.original.notes ?? "—" }}</dd>
+
+                  <template v-if="withState">
+                    <!-- In der Charakter-Ansicht nicht als Spalte gezeigt —
+                         hier aber vollständig verfügbar. -->
+                    <dt class="opacity-60">{{ t("addons.columns.mode") }}</dt>
+                    <dd class="tome-data">
+                      {{ row.original.mode === "developer" ? t("addons.mode.developer") : "—" }}
+                    </dd>
+
+                    <dt class="opacity-60">{{ t("addons.columns.files") }}</dt>
+                    <dd class="tome-data">{{ fmtCount(row.original.file_count) }}</dd>
+                  </template>
 
                   <dt class="opacity-60">{{ t("addons.detail.path") }}</dt>
                   <dd class="tome-data break-all">{{ row.original.path }}</dd>
@@ -344,31 +406,37 @@ async function copyHash(addon: Addon) {
           </template>
 
           <tr v-if="rows.length === 0">
-            <td colspan="8" class="py-6 text-center opacity-70">{{ t("addons.empty") }}</td>
+            <td :colspan="columnCount" class="py-6 text-center opacity-70">{{ t("addons.empty") }}</td>
           </tr>
         </tbody>
       </table>
+
+      <!-- Übersprungene Ordner bleiben sichtbar statt still zu verschwinden:
+           ein falsch benanntes .toc ist ein echter Installationsfehler, den der
+           Nutzer sonst nie erfährt (WoW lädt den Ordner ebenfalls nicht). -->
+      <!-- Nur in der Addon-Ansicht: welcher Ordner kein gültiges .toc hat, ist
+           eine Eigenschaft der Installation, nicht eines Charakters. -->
+      <div
+        v-if="!withState && props.scan.skipped.length"
+        class="mt-5 border-t border-gold-700/30 pt-3"
+      >
+        <button
+          type="button"
+          class="cursor-pointer text-sm opacity-70 hover:opacity-100"
+          :aria-expanded="showSkipped"
+          @click="showSkipped = !showSkipped"
+        >
+          <span aria-hidden="true">{{ showSkipped ? "▼" : "▸" }}</span>
+          {{ t("addons.skipped", { n: props.scan.skipped.length }, props.scan.skipped.length) }}
+        </button>
+        <ul v-if="showSkipped" class="mt-2 space-y-1 text-sm">
+          <li v-for="folder in props.scan.skipped" :key="folder.id" class="flex flex-wrap gap-2">
+            <span class="tome-data">{{ folder.id }}</span>
+            <span class="opacity-60">{{ folder.reason }}</span>
+          </li>
+        </ul>
+      </div>
     </div>
 
-    <!-- Übersprungene Ordner bleiben sichtbar statt still zu verschwinden:
-         ein falsch benanntes .toc ist ein echter Installationsfehler, den der
-         Nutzer sonst nie erfährt (WoW lädt den Ordner ebenfalls nicht). -->
-    <div v-if="props.scan.skipped.length" class="mt-5 border-t border-gold-700/30 pt-3">
-      <button
-        type="button"
-        class="cursor-pointer text-sm opacity-70 hover:opacity-100"
-        :aria-expanded="showSkipped"
-        @click="showSkipped = !showSkipped"
-      >
-        <span aria-hidden="true">{{ showSkipped ? "▼" : "▸" }}</span>
-        {{ t("addons.skipped", { n: props.scan.skipped.length }, props.scan.skipped.length) }}
-      </button>
-      <ul v-if="showSkipped" class="mt-2 space-y-1 text-sm">
-        <li v-for="folder in props.scan.skipped" :key="folder.id" class="flex flex-wrap gap-2">
-          <span class="tome-data">{{ folder.id }}</span>
-          <span class="opacity-60">{{ folder.reason }}</span>
-        </li>
-      </ul>
-    </div>
   </section>
 </template>

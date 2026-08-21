@@ -2,6 +2,32 @@
 export default {
   tagline: "Das kuratierte Verzeichnis der WoW-1.12.1-Addons.",
   language: "Sprache",
+  nav: {
+    label: "Bereiche",
+    wow: "WoW-Zustand",
+    addons: "Addons",
+    characters: "Charaktere",
+    health: { ok: "Alles in Ordnung", warn: "Mit Einschränkungen", error: "Keine Installation" },
+  },
+  health: {
+    notManaged:
+      "Tome of Addons liegt nicht in einem WoW-Ordner und verwaltet daher keine Installation.",
+    clientRunningHere:
+      "WoW läuft gerade. Änderungen an SavedVariables werden beim Beenden überschrieben, und neu installierte Addons erkennt der Client erst nach einem Neustart.",
+    clientRunningUnknown:
+      "Ein WoW-Prozess läuft, ließ sich aber keiner Installation zuordnen. Falls es diese ist: Änderungen können verlorengehen.",
+    noAddonsFolder: "Kein Interface/AddOns-Ordner — es kann noch nichts installiert sein.",
+    exe: {
+      modified: "Die WoW.exe ist gepatcht (weicht vom offiziellen Hash ab).",
+      "unknown-build": "Unbekannter Build — kein offizieller Referenz-Hash vorhanden.",
+      unknown: "Kein erkennbarer WoW-Client.",
+    },
+  },
+  character: {
+    tally: "{on} aktiv · {off} aus · {unseen} nie gesehen",
+    activeButOutdated:
+      "{n} aktives Addon ist veraltet und wird trotz Häkchen nicht geladen. | {n} aktive Addons sind veraltet und werden trotz Häkchen nicht geladen.",
+  },
   wow: {
     searching: "Suche WoW-Installation…",
     managed: "Verwaltet",
@@ -32,9 +58,11 @@ export default {
     title: "Addons",
     search: "Suchen (Name, Autor, Hash, Pfad)…",
     developerOnly: "Nur Git-Checkouts",
-    outdatedOnly: "Nur veraltete ({n})",
-    outdatedHint:
-      "{n} Addon hat eine andere Interface-Version als dein Client ({client}). WoW lädt es nur, wenn im AddOn-Fenster „Veraltete AddOns laden“ aktiviert ist. | {n} Addons haben eine andere Interface-Version als dein Client ({client}). WoW lädt sie nur, wenn im AddOn-Fenster „Veraltete AddOns laden“ aktiviert ist.",
+    showOutdated: "Auch veraltete zeigen ({n})",
+    outdatedHidden:
+      "{n} Addon ist veraltet ({client} erwartet) und wird von deinem Client nicht geladen — es ist hier ausgeblendet. | {n} Addons sind veraltet ({client} erwartet) und werden von deinem Client nicht geladen — sie sind hier ausgeblendet.",
+    outdatedLoaded:
+      "{n} Addon ist veraltet ({client} erwartet). Dein Client lädt es trotzdem, weil „Veraltete AddOns laden“ aktiv ist. | {n} Addons sind veraltet ({client} erwartet). Dein Client lädt sie trotzdem, weil „Veraltete AddOns laden“ aktiv ist.",
     outdatedTitle: "Veraltet — Client erwartet {client}",
     character: "Charakter",
     noCharacter: "— keiner —",
