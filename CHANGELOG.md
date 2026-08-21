@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/vanilla-wow-dev/tome-of-addons/compare/v0.2.1...v0.3.0) (2026-08-21)
+
+
+### Features
+
+* **tauri:** local addons ([#13](https://github.com/vanilla-wow-dev/tome-of-addons/issues/13)) ([69d7d1d](https://github.com/vanilla-wow-dev/tome-of-addons/commit/69d7d1dce7ab9916e8a59df5b288336393f1285a))
+* **ui:** new layout ([#15](https://github.com/vanilla-wow-dev/tome-of-addons/issues/15)) ([6bf981b](https://github.com/vanilla-wow-dev/tome-of-addons/commit/6bf981b372f5d4aa93163ca4a5478ee425b8e883))
+
+
+### Bug Fixes
+
+* **ui:** addon name colors & order ([#16](https://github.com/vanilla-wow-dev/tome-of-addons/issues/16)) ([77ef4f0](https://github.com/vanilla-wow-dev/tome-of-addons/commit/77ef4f0a2cc06e9f7ef2f507ab7ff9239ba6957f))
+
 ## [0.2.1](https://github.com/vanilla-wow-dev/tome-of-addons/compare/v0.2.0...v0.2.1) (2026-05-31)
 
 
