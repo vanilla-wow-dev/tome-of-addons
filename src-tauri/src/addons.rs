@@ -26,6 +26,14 @@ pub enum Mode {
     Developer,
 }
 
+/// Ein Stück Titel mit eigener Farbe.
+#[derive(Serialize, Clone, Debug)]
+pub struct TitleSpan {
+    pub text: String,
+    /// `rrggbb`, oder `None` für die Standardfarbe.
+    pub color: Option<String>,
+}
+
 /// Ein erkanntes Addon.
 #[derive(Serialize, Clone, Debug)]
 pub struct Addon {
@@ -37,6 +45,9 @@ pub struct Addon {
     /// Der Fallback ist nicht theoretisch — vier Addons im vermessenen Bestand
     /// haben überhaupt kein `## Title`, und WoW selbst fällt genauso zurück.
     pub title: String,
+    /// Derselbe Titel in farbigen Abschnitten. Leer, wenn er aus dem
+    /// Ordnernamen stammt — ein Ersatzname hat keine Farben.
+    pub title_spans: Vec<TitleSpan>,
     /// Reiner `## Version`-String, rein informativ. Bei 143 von 242 Addons
     /// fehlt er ganz; die Identität liefert immer `tree_sha`.
     pub version: Option<String>,
@@ -231,11 +242,20 @@ fn scan_one(folder: &Path, previous: &HashMap<String, CacheEntry>) -> Outcome {
         Mode::Consumer
     };
 
+    let display = toc.display_title().filter(|title| !title.is_empty());
     let mut addon = Addon {
-        title: toc
-            .display_title()
-            .filter(|title| !title.is_empty())
-            .unwrap_or_else(|| id.clone()),
+        title_spans: if display.is_some() {
+            toc.title_segments()
+                .into_iter()
+                .map(|segment| TitleSpan {
+                    text: segment.text,
+                    color: segment.color,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        },
+        title: display.unwrap_or_else(|| id.clone()),
         version: toc.version().map(str::to_string),
         interface: toc.interface().map(str::to_string),
         notes: toc.notes().map(str::to_string),
@@ -435,6 +455,52 @@ mod tests {
         assert!(addon.size_bytes > 0);
         assert_eq!(scan.hashed, 1);
         assert_eq!(scan.cache_hits, 0);
+    }
+
+    #[test]
+    fn liefert_den_titel_in_farbigen_abschnitten() {
+        let tree = TempAddons::new("title-spans");
+        tree.addon(
+            "pfQuest",
+            "## Interface: 11200\n## Title: |cff33ffccpf|cffffffffQuest\n",
+        );
+        let mut cache = HashCache::default();
+        let result = scan(tree.path(), &mut cache).unwrap();
+        let addon = find(&result, "pfQuest");
+        assert_eq!(addon.title, "pfQuest");
+        assert_eq!(addon.title_spans.len(), 2);
+        assert_eq!(addon.title_spans[0].text, "pf");
+        assert_eq!(addon.title_spans[0].color.as_deref(), Some("33ffcc"));
+        assert_eq!(addon.title_spans[1].color.as_deref(), Some("ffffff"));
+        assert!(format!("{:?}", addon.title_spans[0]).contains("TitleSpan"));
+    }
+
+    #[test]
+    fn ein_ersatzname_bekommt_keine_farben() {
+        // Der Ordnername ist kein Titel des Autors — ihn einzufärben wäre
+        // erfunden.
+        let tree = TempAddons::new("no-title-spans");
+        tree.addon("CT_BarMod", "## Interface: 11200\n");
+        let mut cache = HashCache::default();
+        let result = scan(tree.path(), &mut cache).unwrap();
+        let addon = find(&result, "CT_BarMod");
+        assert_eq!(addon.title, "CT_BarMod");
+        assert!(addon.title_spans.is_empty());
+    }
+
+    #[test]
+    fn bei_doppeltem_titel_gewinnt_die_letzte_angabe() {
+        // Realer Fall: Config.toc trug einen Copy-Paste-Rest aus dem
+        // Nachbar-Addon in der Zeile darüber.
+        let tree = TempAddons::new("duplicate-title");
+        tree.addon(
+            "Config",
+            "## Interface: 11200\n## Title: [mojo] Addons\n## Title: [mojo] Config\n",
+        );
+        let mut cache = HashCache::default();
+        let result = scan(tree.path(), &mut cache).unwrap();
+        let addon = find(&result, "Config");
+        assert_eq!(addon.title, "[mojo] Config");
     }
 
     #[test]

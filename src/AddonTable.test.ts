@@ -24,6 +24,11 @@ function addon(overrides: Partial<Addon> = {}): Addon {
     cached: false,
     error: null,
     ...overrides,
+    // Segmente folgen dem tatsächlichen Titel, sonst zeigte die Tabelle den
+    // Vorgabewert statt des überschriebenen.
+    title_spans: overrides.title_spans ?? [
+      { text: overrides.title ?? "pfQuest", color: null },
+    ],
   };
 }
 
@@ -241,6 +246,72 @@ describe("AddonTable – Detail-Ausklappung", () => {
     const detail = wrapper.findAll("tbody tr")[1].text();
     expect(detail).toContain("Autor");
     expect(detail).toContain("—");
+  });
+});
+
+describe("AddonTable – Titelfarben", () => {
+  const coloured: AddonScan = {
+    ...SCAN,
+    addons: [
+      addon({
+        id: "ShaguPlates",
+        title: "ShaguPlates",
+        title_spans: [
+          { text: "Shagu", color: "33ffcc" },
+          { text: "Plates", color: "ffffff" },
+        ],
+      }),
+    ],
+  };
+
+  /** Ersetzt `matchMedia`, das jsdom nicht mitbringt. */
+  function stubMatchMedia(matches: boolean) {
+    const listeners: Array<(event: MediaQueryListEvent) => void> = [];
+    const mql = {
+      matches,
+      addEventListener: (_: string, fn: (event: MediaQueryListEvent) => void) =>
+        listeners.push(fn),
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal("matchMedia", () => mql);
+    return {
+      listeners,
+      removeEventListener: mql.removeEventListener,
+    };
+  }
+
+  it("färbt die Abschnitte des Autors ein", () => {
+    const wrapper = mountTable(coloured);
+    const spans = wrapper.findAll("tbody tr td span span");
+    expect(spans.map((span) => span.text())).toEqual(["Shagu", "Plates"]);
+    // Weiß auf Pergament wäre unsichtbar und wird nachgezogen.
+    expect(spans[1].attributes("style")).not.toContain("255, 255, 255");
+    expect(spans[1].attributes("style")).toContain("color");
+  });
+
+  it("färbt einen Ersatznamen nicht ein", () => {
+    // Der Ordnername stammt nicht vom Autor — ihn zu färben wäre erfunden.
+    const wrapper = mountTable({
+      ...SCAN,
+      addons: [addon({ id: "CT_BarMod", title: "CT_BarMod", title_spans: [] })],
+    });
+    expect(wrapper.findAll("tbody tr td span span")).toHaveLength(0);
+    expect(wrapper.text()).toContain("CT_BarMod");
+  });
+
+  it("folgt einem Wechsel des Systemthemas", async () => {
+    const { listeners, removeEventListener } = stubMatchMedia(false);
+    const wrapper = mountTable(coloured);
+    const light = wrapper.findAll("tbody tr td span span")[1].attributes("style");
+
+    listeners.forEach((fn) => fn({ matches: true } as MediaQueryListEvent));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.findAll("tbody tr td span span")[1].attributes("style")).not.toBe(light);
+
+    // Beim Zerstören wieder abmelden, sonst hält der Listener die Komponente fest.
+    wrapper.unmount();
+    expect(removeEventListener).toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });
 

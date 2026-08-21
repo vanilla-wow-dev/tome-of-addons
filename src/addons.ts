@@ -5,10 +5,19 @@ import type { WowExeInfo, WowRoot } from "./wow";
 
 export type AddonMode = "consumer" | "developer";
 
+/** Ein Stück Titel mit eigener Farbe. */
+export interface TitleSpan {
+  text: string;
+  /** `rrggbb`, oder `null` für die Standardfarbe. */
+  color: string | null;
+}
+
 export interface Addon {
   id: string;
   path: string;
   title: string;
+  /** Derselbe Titel in farbigen Abschnitten; leer bei Ersatznamen. */
+  title_spans: TitleSpan[];
   version: string | null;
   interface: string | null;
   notes: string | null;
@@ -133,6 +142,86 @@ export function matchesQuery(addon: Addon, query: string): boolean {
     addon.tree_sha,
     addon.path,
   ].some((field) => !!field && field.toLowerCase().includes(needle));
+}
+
+/* -------------------------------------------------------------------------
+   Titelfarben
+
+   Addon-Autoren färben ihre Titel für den dunklen Spiel-Hintergrund. `ffffff`
+   auf Pergament wäre unsichtbar. Farben werden deshalb nur so weit
+   nachgezogen, bis sie den Mindestkontrast erreichen — wer schon lesbar ist,
+   bleibt unangetastet.
+   ------------------------------------------------------------------------- */
+
+/** Panel-Hintergründe aus `style.css` — Bezugspunkt für den Kontrast. */
+const PANEL_LIGHT = "fbf6e9";
+const PANEL_DARK = "1f1811";
+/** WCAG-AA für normalen Text. */
+const MIN_CONTRAST = 4.5;
+/**
+ * Zielwert beim Nachziehen. Etwas über der Schwelle, weil das Ergebnis auf
+ * 8-Bit-Kanäle gerundet wird und sonst haarscharf darunter landen kann.
+ */
+const CONTRAST_TARGET = 4.6;
+
+function channels(hex: string): [number, number, number] {
+  const value = parseInt(hex, 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
+
+function toLinear(channel: number): number {
+  const c = channel / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+function toSrgb(linear: number): number {
+  const c = linear <= 0.0031308 ? linear * 12.92 : 1.055 * linear ** (1 / 2.4) - 0.055;
+  return Math.round(Math.min(1, Math.max(0, c)) * 255);
+}
+
+/** `rrggbb` in lineares Licht. Getrennt von der Luminanz, damit nicht
+ *  versehentlich zweimal umgerechnet wird. */
+function linearOf(hex: string): [number, number, number] {
+  return channels(hex).map(toLinear) as [number, number, number];
+}
+
+/** Relative Luminanz aus *linearen* Kanälen. */
+function luminanceOf([r, g, b]: [number, number, number]): number {
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** Kontrastverhältnis zweier Farben nach WCAG, jeweils als `rrggbb`. */
+export function contrastRatio(a: string, b: string): number {
+  const [high, low] = [luminanceOf(linearOf(a)), luminanceOf(linearOf(b))].sort((x, y) => y - x);
+  return (high + 0.05) / (low + 0.05);
+}
+
+/**
+ * Zieht eine Autorenfarbe so weit nach, dass sie vor dem Panel lesbar bleibt.
+ *
+ * Abgedunkelt wird durch Skalieren im linearen Licht (der Farbton bleibt),
+ * aufgehellt durch Mischen mit Weiß — Skalieren nach oben würde Kanäle in die
+ * Sättigung treiben und den Farbton verziehen.
+ */
+export function readableColor(hex: string, dark: boolean): string {
+  const background = dark ? PANEL_DARK : PANEL_LIGHT;
+  if (contrastRatio(hex, background) >= MIN_CONTRAST) return `#${hex}`;
+
+  const backgroundLuminance = luminanceOf(linearOf(background));
+  const linear = linearOf(hex);
+  const current = luminanceOf(linear);
+
+  let adjusted: [number, number, number];
+  if (dark) {
+    const target = (backgroundLuminance + 0.05) * CONTRAST_TARGET - 0.05;
+    const mix = Math.min(1, Math.max(0, (target - current) / (1 - current)));
+    adjusted = linear.map((c) => c + (1 - c) * mix) as [number, number, number];
+  } else {
+    const target = (backgroundLuminance + 0.05) / CONTRAST_TARGET - 0.05;
+    const scale = current > 0 ? Math.min(1, target / current) : 1;
+    adjusted = linear.map((c) => c * scale) as [number, number, number];
+  }
+  return `#${adjusted.map((c) => toSrgb(c).toString(16).padStart(2, "0")).join("")}`;
 }
 
 /** Verhältnis eines Addons zur Interface-Version des Clients. */

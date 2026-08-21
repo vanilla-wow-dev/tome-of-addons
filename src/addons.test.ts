@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  contrastRatio,
+  readableColor,
   activeCount,
   installationHealth,
   stateFor,
@@ -32,6 +34,11 @@ function addon(overrides: Partial<Addon> = {}): Addon {
     cached: false,
     error: null,
     ...overrides,
+    // Segmente folgen dem tatsächlichen Titel, sonst zeigte die Tabelle den
+    // Vorgabewert statt des überschriebenen.
+    title_spans: overrides.title_spans ?? [
+      { text: overrides.title ?? "pfQuest", color: null },
+    ],
   };
 }
 
@@ -259,5 +266,59 @@ describe("activeCount / stateFor", () => {
     expect(stateFor(character, addon({ id: "pfQuest" }))).toBe(false);
     expect(stateFor(character, addon({ id: "Unbekannt" }))).toBeNull();
     expect(stateFor(null, addon({ id: "pfQuest" }))).toBeNull();
+  });
+});
+
+describe("Titelfarben", () => {
+  const PANEL_LIGHT = "fbf6e9";
+  const PANEL_DARK = "1f1811";
+
+  it("berechnet das Kontrastverhältnis nach WCAG", () => {
+    // Bekannte Eckwerte: Schwarz auf Weiß ist 21:1, gleiche Farbe 1:1.
+    expect(contrastRatio("000000", "ffffff")).toBeCloseTo(21, 1);
+    expect(contrastRatio("ff0000", "ff0000")).toBeCloseTo(1, 5);
+    // Reihenfolge ist egal.
+    expect(contrastRatio("000000", "ffffff")).toBeCloseTo(
+      contrastRatio("ffffff", "000000"),
+      5,
+    );
+  });
+
+  it("lässt bereits lesbare Farben unangetastet", () => {
+    // Dunkles Blau auf Pergament ist ohne Zutun kontraststark genug.
+    expect(readableColor("003366", false)).toBe("#003366");
+  });
+
+  it("dunkelt zu helle Farben auf Pergament ab, bis sie lesbar sind", () => {
+    // Reales Beispiel: |cffffffff aus „|cff33ffccShagu|cffffffffPlates".
+    const adjusted = readableColor("ffffff", false);
+    expect(adjusted).not.toBe("#ffffff");
+    expect(contrastRatio(adjusted.slice(1), PANEL_LIGHT)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("hellt zu dunkle Farben im Dunkelmodus auf", () => {
+    const adjusted = readableColor("000000", true);
+    expect(adjusted).not.toBe("#000000");
+    expect(contrastRatio(adjusted.slice(1), PANEL_DARK)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("erreicht den Mindestkontrast für alle Farben des echten Bestands", () => {
+    // Aus den tatsächlich vorkommenden Titeln.
+    const observed = ["33ffcc", "ffffff", "ff8080", "7fff7f", "006699", "3fcf26", "cfcfcf"];
+    for (const dark of [false, true]) {
+      for (const color of observed) {
+        const adjusted = readableColor(color, dark).slice(1);
+        expect(contrastRatio(adjusted, dark ? PANEL_DARK : PANEL_LIGHT)).toBeGreaterThanOrEqual(
+          4.4,
+        );
+      }
+    }
+  });
+
+  it("behält den Farbton beim Abdunkeln", () => {
+    // Türkis bleibt türkis: Grün und Blau bleiben über Rot.
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(readableColor("33ffcc", false).slice(i, i + 2), 16));
+    expect(g).toBeGreaterThan(r);
+    expect(b).toBeGreaterThan(r);
   });
 });
