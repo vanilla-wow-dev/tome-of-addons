@@ -39,6 +39,8 @@ function addon(overrides: Partial<Addon> = {}): Addon {
     title_spans: overrides.title_spans ?? [
       { text: overrides.title ?? "pfQuest", color: null },
     ],
+    // Ohne Farbcodes ist der rohe Titel der Anzeigetitel.
+    title_raw: overrides.title_raw ?? overrides.title ?? "pfQuest",
   };
 }
 
@@ -79,20 +81,80 @@ describe("matchesQuery", () => {
   });
 });
 
-describe("compareTitles", () => {
-  it("sortiert alphabetisch nach dem Anzeigetitel", () => {
-    const sorted = [addon({ title: "Zed" }), addon({ title: "Atlas" })].sort(compareTitles);
-    expect(sorted.map((a) => a.title)).toEqual(["Atlas", "Zed"]);
+describe("compareTitles – Reihenfolge des WoW-Clients", () => {
+  /** Baut Addons aus rohen Titeln und sortiert sie wie der Client. */
+  const sortRaw = (raws: string[]) =>
+    raws
+      .map((raw) => addon({ title_raw: raw }))
+      .sort(compareTitles)
+      .map((a) => a.title_raw);
+
+  it("sortiert alphabetisch und ohne Rücksicht auf Groß-/Kleinschreibung", () => {
+    expect(sortRaw(["Zed", "Atlas"])).toEqual(["Atlas", "Zed"]);
+    expect(compareTitles(addon({ title_raw: "atlas" }), addon({ title_raw: "Atlas" }))).toBe(0);
   });
 
-  it("ignoriert Groß-/Kleinschreibung", () => {
-    expect(compareTitles(addon({ title: "atlas" }), addon({ title: "Atlas" }))).toBe(0);
+  it("reproduziert den Anfang der Client-Liste", () => {
+    // Aus dem AddOn-Fenster abgelesen: „[K] …" steht vor „Accountant",
+    // weil `[` (0x5B) vor `a` (0x61) liegt.
+    expect(
+      sortRaw([
+        "AceTimer",
+        "Accountant v2.3",
+        "[K] Extended QuestLog 3.6.1",
+        "Ace 1.3.1",
+        "AceGUI",
+      ]),
+    ).toEqual([
+      "[K] Extended QuestLog 3.6.1",
+      "Accountant v2.3",
+      "Ace 1.3.1",
+      "AceGUI",
+      "AceTimer",
+    ]);
   });
 
-  it("sortiert Zahlen natürlich statt lexikalisch", () => {
-    // Ohne `numeric` landete "Addon 10" vor "Addon 2".
-    const sorted = [addon({ title: "Addon 10" }), addon({ title: "Addon 2" })].sort(compareTitles);
-    expect(sorted.map((a) => a.title)).toEqual(["Addon 2", "Addon 10"]);
+  it("stellt alle gefärbten Titel hinter alle ungefärbten", () => {
+    // `|` (0x7C) liegt hinter `z` (0x7A). Genau das sieht aus wie
+    // „Farben beeinflussen die Reihenfolge".
+    expect(
+      sortRaw([
+        "|cff33ffccShagu|cffffffffChat",
+        "WIM",
+        "|cFF006699Optional -|r AutoInvite",
+        "XRaidStatus |cff7fff7f -Ace2-|r",
+      ]),
+    ).toEqual([
+      "WIM",
+      "XRaidStatus |cff7fff7f -Ace2-|r",
+      "|cFF006699Optional -|r AutoInvite",
+      "|cff33ffccShagu|cffffffffChat",
+    ]);
+  });
+
+  it("reproduziert das Ende der Client-Liste über die Hex-Werte", () => {
+    // Beobachtete Folge: 006699 (Optional/UUI) → 33ffcc (pf/Shagu)
+    // → 3fcf26 ([mojo]) → b700b7 (Necrosis). Necrosis schreibt sein
+    // `|CFF…` groß und ordnet sich trotzdem korrekt ein.
+    expect(
+      sortRaw([
+        "|CFFB700B7N|CFFFF00FFecrosis LdC",
+        "|cff3fcf26[mojo]|r Addons",
+        "|cff33ffccShagu|cffffffffValue",
+        "|cFF006699UUI -|r WhoPinged",
+      ]),
+    ).toEqual([
+      "|cFF006699UUI -|r WhoPinged",
+      "|cff33ffccShagu|cffffffffValue",
+      "|cff3fcf26[mojo]|r Addons",
+      "|CFFB700B7N|CFFFF00FFecrosis LdC",
+    ]);
+  });
+
+  it("sortiert Zahlen wie der Client, also lexikalisch", () => {
+    // Bewusst *keine* natürliche Sortierung: der Client hat sie nicht, und
+    // Abweichen hieße, die Reihenfolge nicht mehr nachzubilden.
+    expect(sortRaw(["Addon 2", "Addon 10"])).toEqual(["Addon 10", "Addon 2"]);
   });
 });
 

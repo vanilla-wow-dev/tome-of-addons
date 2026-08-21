@@ -18,6 +18,8 @@ export interface Addon {
   title: string;
   /** Derselbe Titel in farbigen Abschnitten; leer bei Ersatznamen. */
   title_spans: TitleSpan[];
+  /** Roher `## Title` inklusive Farbcodes — Sortierschlüssel des Clients. */
+  title_raw: string;
   version: string | null;
   interface: string | null;
   notes: string | null;
@@ -247,18 +249,29 @@ export function countOutdated(addons: Addon[], clientInterface: string | null): 
 }
 
 /**
- * Sortierwert für die Addon-Spalte.
+ * Sortiert wie der WoW-Client seine AddOn-Liste.
  *
- * Sortiert wird nach dem Anzeigetitel, nicht nach der Ordner-ID — das ist, was
- * der Nutzer liest. `localeCompare` mit `numeric`, damit "Addon 2" vor
- * "Addon 10" landet, und `sensitivity: "base"`, damit Groß-/Kleinschreibung und
- * Akzente die Reihenfolge nicht zerreißen.
+ * Verglichen wird der **rohe** `## Title` inklusive Farbcodes, kleingeschrieben
+ * und zeichenweise — nicht der Anzeigetitel. Die Regel ist am laufenden Client
+ * verifiziert (Screenshots des AddOn-Fensters, Anfang und Ende der Liste
+ * Zeile für Zeile reproduziert). Drei ASCII-Eigenheiten erklären sie:
+ *
+ * - `[` (0x5B) < `a` (0x61) — „[K] Extended QuestLog" steht deshalb ganz vorn.
+ * - `|` (0x7C) > `z` (0x7A) — **alle** gefärbten Titel landen hinter allen
+ *   ungefärbten. Das ist der Effekt, der wie „Farben beeinflussen die
+ *   Reihenfolge" aussieht.
+ * - Innerhalb der gefärbten entscheidet der Hex-Wert: `006699` vor `33ffcc`
+ *   vor `3fcf26` vor `b700b7`.
+ *
+ * Bewusst kein `localeCompare`: dessen Kollation ordnet Satzzeichen nach
+ * eigenen Regeln ein und würde genau diese Eigenheiten wegbügeln. Aus demselben
+ * Grund entfällt die natürliche Zahlensortierung — der Client hat sie nicht,
+ * „Addon 10" steht dort vor „Addon 2".
  */
 export function compareTitles(a: Addon, b: Addon): number {
-  return a.title.localeCompare(b.title, undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
+  const left = a.title_raw.toLowerCase();
+  const right = b.title_raw.toLowerCase();
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 /** Formatiert eine Dateianzahl mit Tausendertrennung der aktiven Locale. */

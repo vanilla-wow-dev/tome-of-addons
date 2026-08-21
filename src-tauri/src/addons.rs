@@ -48,6 +48,11 @@ pub struct Addon {
     /// Derselbe Titel in farbigen Abschnitten. Leer, wenn er aus dem
     /// Ordnernamen stammt — ein Ersatzname hat keine Farben.
     pub title_spans: Vec<TitleSpan>,
+    /// Roher `## Title` **inklusive** Farbcodes, ersatzweise der Ordnername.
+    ///
+    /// Danach sortiert der Client seine Addon-Liste. Für die Anzeige ist er
+    /// ungeeignet, für die Reihenfolge unverzichtbar.
+    pub title_raw: String,
     /// Reiner `## Version`-String, rein informativ. Bei 143 von 242 Addons
     /// fehlt er ganz; die Identität liefert immer `tree_sha`.
     pub version: Option<String>,
@@ -244,6 +249,11 @@ fn scan_one(folder: &Path, previous: &HashMap<String, CacheEntry>) -> Outcome {
 
     let display = toc.display_title().filter(|title| !title.is_empty());
     let mut addon = Addon {
+        title_raw: match (&display, toc.title()) {
+            (Some(_), Some(raw)) => raw.to_string(),
+            // Ohne `## Title` zeigt und sortiert der Client den Ordnernamen.
+            _ => id.clone(),
+        },
         title_spans: if display.is_some() {
             toc.title_segments()
                 .into_iter()

@@ -29,6 +29,8 @@ function addon(overrides: Partial<Addon> = {}): Addon {
     title_spans: overrides.title_spans ?? [
       { text: overrides.title ?? "pfQuest", color: null },
     ],
+    // Ohne Farbcodes ist der rohe Titel der Anzeigetitel.
+    title_raw: overrides.title_raw ?? overrides.title ?? "pfQuest",
   };
 }
 

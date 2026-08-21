@@ -12,6 +12,7 @@ function addon(id: string): Addon {
     path: `/games/WoW/Interface/AddOns/${id}`,
     title: id,
     title_spans: [{ text: id, color: null }],
+    title_raw: id,
     version: null,
     interface: "11200",
     notes: null,
