@@ -428,8 +428,7 @@ describe("App – Seitenleiste, Charaktere und Fortschritt", () => {
       if (cmd === "detect_command") return Promise.resolve({ managed: ROOT, suggestions: [] });
       if (cmd === "inspect_wow_exe_command") return Promise.resolve(EXE);
       if (cmd === "client_state_command") return Promise.resolve("not-running");
-    if (cmd === "wow_settings_command")
-      return Promise.resolve({ loads_outdated_addons: opts.loadsOutdated ?? true });
+      if (cmd === "wow_settings_command") return Promise.resolve({ loads_outdated_addons: true });
       if (cmd === "list_characters_command") return Promise.reject(new Error("kein WTF"));
       if (cmd === "scan_addons_command") return Promise.resolve(SCAN);
       return Promise.resolve(null);
@@ -452,8 +451,7 @@ describe("App – Seitenleiste, Charaktere und Fortschritt", () => {
       if (cmd === "detect_command") return Promise.resolve({ managed: ROOT, suggestions: [] });
       if (cmd === "inspect_wow_exe_command") return Promise.resolve(EXE);
       if (cmd === "client_state_command") return Promise.resolve("not-running");
-    if (cmd === "wow_settings_command")
-      return Promise.resolve({ loads_outdated_addons: opts.loadsOutdated ?? true });
+      if (cmd === "wow_settings_command") return Promise.resolve({ loads_outdated_addons: true });
       if (cmd === "list_characters_command") return Promise.resolve([]);
       if (cmd === "scan_addons_command") return new Promise((r) => (resolveScan = r));
       return Promise.resolve(null);
