@@ -520,6 +520,28 @@ describe("App – Seitenleiste, Charaktere und Fortschritt", () => {
     expect(wrapper.text()).toContain("Mit Einschränkungen");
   });
 
+  it("fällt bei unlesbaren Client-Einstellungen auf den Vorgabewert zurück", async () => {
+    // Vorgabewert heißt „lädt keine veralteten" — also werden sie ausgeblendet.
+    // Nichts versprechen, was der Client nicht hält.
+    invoke.mockImplementation((cmd: string) => {
+      if (cmd === "detect_command") return Promise.resolve({ managed: ROOT, suggestions: [] });
+      if (cmd === "inspect_wow_exe_command") return Promise.resolve(EXE);
+      if (cmd === "client_state_command") return Promise.resolve("not-running");
+      if (cmd === "wow_settings_command") return Promise.reject(new Error("Config.wtf kaputt"));
+      if (cmd === "list_characters_command") return Promise.resolve([]);
+      if (cmd === "scan_addons_command")
+        return Promise.resolve({
+          ...SCAN,
+          addons: [{ ...SCAN.addons[0], id: "Alt", title: "Alt", interface: "11000" }],
+        });
+      return Promise.resolve(null);
+    });
+    const wrapper = mount(App);
+    await flushPromises();
+    await goTo(wrapper, "Addons");
+    expect(wrapper.text()).toContain("ist hier ausgeblendet");
+  });
+
   it("nimmt einen Fehler beim Client-Check als „läuft nicht“", async () => {
     // Ein fehlgeschlagener Check darf keine Warnung erfinden.
     invoke.mockImplementation((cmd: string) => {
