@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  contrastRatio,
+  readableColor,
   activeCount,
   installationHealth,
   stateFor,
@@ -32,6 +34,13 @@ function addon(overrides: Partial<Addon> = {}): Addon {
     cached: false,
     error: null,
     ...overrides,
+    // Segmente folgen dem tatsächlichen Titel, sonst zeigte die Tabelle den
+    // Vorgabewert statt des überschriebenen.
+    title_spans: overrides.title_spans ?? [
+      { text: overrides.title ?? "pfQuest", color: null },
+    ],
+    // Ohne Farbcodes ist der rohe Titel der Anzeigetitel.
+    title_raw: overrides.title_raw ?? overrides.title ?? "pfQuest",
   };
 }
 
@@ -72,20 +81,80 @@ describe("matchesQuery", () => {
   });
 });
 
-describe("compareTitles", () => {
-  it("sortiert alphabetisch nach dem Anzeigetitel", () => {
-    const sorted = [addon({ title: "Zed" }), addon({ title: "Atlas" })].sort(compareTitles);
-    expect(sorted.map((a) => a.title)).toEqual(["Atlas", "Zed"]);
+describe("compareTitles – Reihenfolge des WoW-Clients", () => {
+  /** Baut Addons aus rohen Titeln und sortiert sie wie der Client. */
+  const sortRaw = (raws: string[]) =>
+    raws
+      .map((raw) => addon({ title_raw: raw }))
+      .sort(compareTitles)
+      .map((a) => a.title_raw);
+
+  it("sortiert alphabetisch und ohne Rücksicht auf Groß-/Kleinschreibung", () => {
+    expect(sortRaw(["Zed", "Atlas"])).toEqual(["Atlas", "Zed"]);
+    expect(compareTitles(addon({ title_raw: "atlas" }), addon({ title_raw: "Atlas" }))).toBe(0);
   });
 
-  it("ignoriert Groß-/Kleinschreibung", () => {
-    expect(compareTitles(addon({ title: "atlas" }), addon({ title: "Atlas" }))).toBe(0);
+  it("reproduziert den Anfang der Client-Liste", () => {
+    // Aus dem AddOn-Fenster abgelesen: „[K] …" steht vor „Accountant",
+    // weil `[` (0x5B) vor `a` (0x61) liegt.
+    expect(
+      sortRaw([
+        "AceTimer",
+        "Accountant v2.3",
+        "[K] Extended QuestLog 3.6.1",
+        "Ace 1.3.1",
+        "AceGUI",
+      ]),
+    ).toEqual([
+      "[K] Extended QuestLog 3.6.1",
+      "Accountant v2.3",
+      "Ace 1.3.1",
+      "AceGUI",
+      "AceTimer",
+    ]);
   });
 
-  it("sortiert Zahlen natürlich statt lexikalisch", () => {
-    // Ohne `numeric` landete "Addon 10" vor "Addon 2".
-    const sorted = [addon({ title: "Addon 10" }), addon({ title: "Addon 2" })].sort(compareTitles);
-    expect(sorted.map((a) => a.title)).toEqual(["Addon 2", "Addon 10"]);
+  it("stellt alle gefärbten Titel hinter alle ungefärbten", () => {
+    // `|` (0x7C) liegt hinter `z` (0x7A). Genau das sieht aus wie
+    // „Farben beeinflussen die Reihenfolge".
+    expect(
+      sortRaw([
+        "|cff33ffccShagu|cffffffffChat",
+        "WIM",
+        "|cFF006699Optional -|r AutoInvite",
+        "XRaidStatus |cff7fff7f -Ace2-|r",
+      ]),
+    ).toEqual([
+      "WIM",
+      "XRaidStatus |cff7fff7f -Ace2-|r",
+      "|cFF006699Optional -|r AutoInvite",
+      "|cff33ffccShagu|cffffffffChat",
+    ]);
+  });
+
+  it("reproduziert das Ende der Client-Liste über die Hex-Werte", () => {
+    // Beobachtete Folge: 006699 (Optional/UUI) → 33ffcc (pf/Shagu)
+    // → 3fcf26 ([mojo]) → b700b7 (Necrosis). Necrosis schreibt sein
+    // `|CFF…` groß und ordnet sich trotzdem korrekt ein.
+    expect(
+      sortRaw([
+        "|CFFB700B7N|CFFFF00FFecrosis LdC",
+        "|cff3fcf26[mojo]|r Addons",
+        "|cff33ffccShagu|cffffffffValue",
+        "|cFF006699UUI -|r WhoPinged",
+      ]),
+    ).toEqual([
+      "|cFF006699UUI -|r WhoPinged",
+      "|cff33ffccShagu|cffffffffValue",
+      "|cff3fcf26[mojo]|r Addons",
+      "|CFFB700B7N|CFFFF00FFecrosis LdC",
+    ]);
+  });
+
+  it("sortiert Zahlen wie der Client, also lexikalisch", () => {
+    // Bewusst *keine* natürliche Sortierung: der Client hat sie nicht, und
+    // Abweichen hieße, die Reihenfolge nicht mehr nachzubilden.
+    expect(sortRaw(["Addon 2", "Addon 10"])).toEqual(["Addon 10", "Addon 2"]);
   });
 });
 
@@ -259,5 +328,59 @@ describe("activeCount / stateFor", () => {
     expect(stateFor(character, addon({ id: "pfQuest" }))).toBe(false);
     expect(stateFor(character, addon({ id: "Unbekannt" }))).toBeNull();
     expect(stateFor(null, addon({ id: "pfQuest" }))).toBeNull();
+  });
+});
+
+describe("Titelfarben", () => {
+  const PANEL_LIGHT = "fbf6e9";
+  const PANEL_DARK = "1f1811";
+
+  it("berechnet das Kontrastverhältnis nach WCAG", () => {
+    // Bekannte Eckwerte: Schwarz auf Weiß ist 21:1, gleiche Farbe 1:1.
+    expect(contrastRatio("000000", "ffffff")).toBeCloseTo(21, 1);
+    expect(contrastRatio("ff0000", "ff0000")).toBeCloseTo(1, 5);
+    // Reihenfolge ist egal.
+    expect(contrastRatio("000000", "ffffff")).toBeCloseTo(
+      contrastRatio("ffffff", "000000"),
+      5,
+    );
+  });
+
+  it("lässt bereits lesbare Farben unangetastet", () => {
+    // Dunkles Blau auf Pergament ist ohne Zutun kontraststark genug.
+    expect(readableColor("003366", false)).toBe("#003366");
+  });
+
+  it("dunkelt zu helle Farben auf Pergament ab, bis sie lesbar sind", () => {
+    // Reales Beispiel: |cffffffff aus „|cff33ffccShagu|cffffffffPlates".
+    const adjusted = readableColor("ffffff", false);
+    expect(adjusted).not.toBe("#ffffff");
+    expect(contrastRatio(adjusted.slice(1), PANEL_LIGHT)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("hellt zu dunkle Farben im Dunkelmodus auf", () => {
+    const adjusted = readableColor("000000", true);
+    expect(adjusted).not.toBe("#000000");
+    expect(contrastRatio(adjusted.slice(1), PANEL_DARK)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("erreicht den Mindestkontrast für alle Farben des echten Bestands", () => {
+    // Aus den tatsächlich vorkommenden Titeln.
+    const observed = ["33ffcc", "ffffff", "ff8080", "7fff7f", "006699", "3fcf26", "cfcfcf"];
+    for (const dark of [false, true]) {
+      for (const color of observed) {
+        const adjusted = readableColor(color, dark).slice(1);
+        expect(contrastRatio(adjusted, dark ? PANEL_DARK : PANEL_LIGHT)).toBeGreaterThanOrEqual(
+          4.4,
+        );
+      }
+    }
+  });
+
+  it("behält den Farbton beim Abdunkeln", () => {
+    // Türkis bleibt türkis: Grün und Blau bleiben über Rot.
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(readableColor("33ffcc", false).slice(i, i + 2), 16));
+    expect(g).toBeGreaterThan(r);
+    expect(b).toBeGreaterThan(r);
   });
 });

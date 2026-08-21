@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   createColumnHelper,
@@ -17,6 +17,7 @@ import {
   fmtCount,
   interfaceStatus,
   matchesQuery,
+  readableColor,
   shortHash,
   stateFor,
   type Addon,
@@ -49,6 +50,19 @@ const { t } = useI18n();
  * Spaltenzahl in einer laufenden Tabelle wäre eine Fehlerquelle ohne Nutzen.
  */
 const withState = props.character != null;
+
+/**
+ * Für die Titelfarben wird der Panel-Hintergrund gebraucht. `matchMedia` fehlt
+ * in Testumgebungen — dann gilt der helle Grund, wie im Standardfall.
+ */
+const media =
+  typeof window !== "undefined" && window.matchMedia
+    ? window.matchMedia("(prefers-color-scheme: dark)")
+    : null;
+const dark = ref(media?.matches ?? false);
+const onThemeChange = (event: MediaQueryListEvent) => (dark.value = event.matches);
+media?.addEventListener("change", onThemeChange);
+onUnmounted(() => media?.removeEventListener("change", onThemeChange));
 
 const query = ref("");
 const developerOnly = ref(false);
@@ -279,7 +293,18 @@ async function copyHash(addon: Addon) {
                   <span class="text-gold-700 dark:text-gold-300" aria-hidden="true">{{
                     row.getIsExpanded() ? "▼" : "▸"
                   }}</span>
-                  <span class="font-semibold">{{ row.original.title }}</span>
+                  <!-- Farben stammen vom Addon-Autor. Gerendert wird über
+                       Segmente aus dem Backend, nie über `v-html` — der Inhalt
+                       kommt aus fremden Dateien. -->
+                  <span v-if="row.original.title_spans.length" class="font-semibold">
+                    <span
+                      v-for="(span, index) in row.original.title_spans"
+                      :key="index"
+                      :style="span.color ? { color: readableColor(span.color, dark) } : undefined"
+                      >{{ span.text }}</span
+                    >
+                  </span>
+                  <span v-else class="font-semibold">{{ row.original.title }}</span>
                   <span
                     v-if="row.original.error"
                     class="tome-badge text-verdict-bad dark:text-verdict-bad-dark"

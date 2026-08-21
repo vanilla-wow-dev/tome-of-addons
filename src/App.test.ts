@@ -63,6 +63,8 @@ const SCAN = {
       id: "pfQuest",
       path: "/games/WoW/Interface/AddOns/pfQuest",
       title: "pfQuest",
+      title_spans: [{ text: "pfQuest", color: null }],
+      title_raw: "pfQuest",
       version: "GIT",
       interface: "11200",
       notes: null,

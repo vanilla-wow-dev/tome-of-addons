@@ -75,11 +75,17 @@ impl Toc {
         Toc { directives, files }
     }
 
-    /// Value of a directive, matched case-insensitively. If a key appears more
-    /// than once the first occurrence wins.
+    /// Value of a directive, matched case-insensitively.
+    ///
+    /// If a key appears more than once, the **last** occurrence wins — the same
+    /// thing a line-by-line parser that assigns as it reads does, and what the
+    /// author of such a file means. Observed in the wild exactly once across
+    /// 242 addons: a `Config.toc` carrying a copy-paste leftover `## Title`
+    /// from a sibling addon on the line above the intended one.
     pub fn get(&self, key: &str) -> Option<&str> {
         self.directives
             .iter()
+            .rev()
             .find(|(k, _)| k.eq_ignore_ascii_case(key))
             .map(|(_, v)| v.as_str())
     }
@@ -109,6 +115,11 @@ impl Toc {
     /// Raw title, UI escape sequences included.
     pub fn title(&self) -> Option<&str> {
         self.get("Title")
+    }
+
+    /// Title split into coloured runs, ready for rendering.
+    pub fn title_segments(&self) -> Vec<TitleSegment> {
+        self.title().map(parse_ui_string).unwrap_or_default()
     }
 
     /// Title with UI escapes removed and internal whitespace collapsed — use
@@ -159,6 +170,71 @@ fn strip_bom(bytes: &[u8]) -> &[u8] {
     bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes)
 }
 
+/// A run of title text sharing one colour.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TitleSegment {
+    pub text: String,
+    /// `rrggbb` without the alpha byte, or `None` for the default colour.
+    pub color: Option<String>,
+}
+
+/// Splits a display string into coloured runs.
+///
+/// This is the single parser for WoW's escape syntax; [`strip_ui_escapes`]
+/// derives the plain form from it. Two parsers for one format — one to strip,
+/// one to colour — would drift apart.
+pub fn parse_ui_string(input: &str) -> Vec<TitleSegment> {
+    let mut segments: Vec<TitleSegment> = Vec::new();
+    let mut current = String::new();
+    let mut color: Option<String> = None;
+    let mut chars = input.chars().peekable();
+
+    let flush = |text: &mut String, color: &Option<String>, out: &mut Vec<TitleSegment>| {
+        if !text.is_empty() {
+            out.push(TitleSegment {
+                text: std::mem::take(text),
+                color: color.clone(),
+            });
+        }
+    };
+
+    while let Some(current_char) = chars.next() {
+        if current_char != '|' {
+            current.push(current_char);
+            continue;
+        }
+        match chars.next() {
+            Some('|') => current.push('|'),
+            Some('c' | 'C') => {
+                // `|cAARRGGBB` — the alpha byte is dropped; WoW ignores it for
+                // text and honouring it would only make titles fade out.
+                let mut code = String::new();
+                for _ in 0..8 {
+                    if chars.peek().is_some_and(char::is_ascii_hexdigit) {
+                        code.push(chars.next().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+                flush(&mut current, &color, &mut segments);
+                color = (code.len() == 8).then(|| code[2..].to_ascii_lowercase());
+            }
+            Some('r' | 'R') => {
+                flush(&mut current, &color, &mut segments);
+                color = None;
+            }
+            Some('n') => current.push('\n'),
+            Some('T') => skip_until_escape(&mut chars, 't'),
+            Some('H') => skip_until_escape(&mut chars, 'h'),
+            // The closing `|h` of a hyperlink, unknown escapes and a trailing
+            // lone `|` all contribute nothing.
+            _ => {}
+        }
+    }
+    flush(&mut current, &color, &mut segments);
+    segments
+}
+
 /// Removes WoW UI escape sequences from a display string.
 ///
 /// Handles `||` (literal pipe), `|c` colour starts with up to eight hex digits,
@@ -168,33 +244,12 @@ fn strip_bom(bytes: &[u8]) -> &[u8] {
 /// at the end of the string is tolerated — colour codes without a closing `|r`
 /// occur throughout the real corpus.
 pub fn strip_ui_escapes(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(current) = chars.next() {
-        if current != '|' {
-            out.push(current);
-            continue;
-        }
-        match chars.next() {
-            Some('|') => out.push('|'),
-            Some('c' | 'C') => {
-                for _ in 0..8 {
-                    if chars.peek().is_some_and(char::is_ascii_hexdigit) {
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-            }
-            Some('n') => out.push('\n'),
-            Some('T') => skip_until_escape(&mut chars, 't'),
-            Some('H') => skip_until_escape(&mut chars, 'h'),
-            // `|r`, the closing `|h` of a hyperlink, unknown escapes, and a
-            // trailing lone `|` all contribute nothing.
-            _ => {}
-        }
-    }
-    out.trim().to_string()
+    parse_ui_string(input)
+        .iter()
+        .map(|segment| segment.text.as_str())
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 /// Consumes input up to and including `|<terminator>`.
@@ -368,9 +423,13 @@ init\\enUS.xml
     }
 
     #[test]
-    fn lookup_is_case_insensitive_and_first_wins() {
-        let toc = Toc::parse(b"## Title: first\n## title: second\n");
-        assert_eq!(toc.get("TITLE"), Some("first"));
+    fn lookup_is_case_insensitive_and_the_last_entry_wins() {
+        // Observed exactly once across 242 addons: a `Config.toc` whose first
+        // `## Title` was a copy-paste leftover from a sibling addon and whose
+        // second line held the intended one.
+        let toc = Toc::parse(b"## Title: leftover\n## title: intended\n");
+        assert_eq!(toc.get("TITLE"), Some("intended"));
+        // Both stay in the record — nothing is silently dropped.
         assert_eq!(toc.directives().len(), 2);
     }
 
@@ -476,6 +535,105 @@ init\\enUS.xml
         assert_eq!(strip_ui_escapes("|cffzzTitle"), "zzTitle");
         // Unterminated texture escape must not loop or panic.
         assert_eq!(strip_ui_escapes("a|Tunterminated"), "a");
+    }
+
+    #[test]
+    fn splits_a_title_into_coloured_runs() {
+        // Real title from the corpus: two colour codes, no closing `|r`.
+        assert_eq!(
+            parse_ui_string("|cff33ffccShagu|cffffffffPlates"),
+            vec![
+                TitleSegment {
+                    text: "Shagu".into(),
+                    color: Some("33ffcc".into())
+                },
+                TitleSegment {
+                    text: "Plates".into(),
+                    color: Some("ffffff".into())
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn uncoloured_runs_carry_no_colour() {
+        assert_eq!(
+            parse_ui_string("DPSMate |cFFFF8080-Shino-|r!"),
+            vec![
+                TitleSegment {
+                    text: "DPSMate ".into(),
+                    color: None
+                },
+                TitleSegment {
+                    text: "-Shino-".into(),
+                    color: Some("ff8080".into())
+                },
+                TitleSegment {
+                    text: "!".into(),
+                    color: None
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn drops_the_alpha_byte() {
+        // `|cAARRGGBB` — honouring alpha would only make titles fade out.
+        assert_eq!(
+            parse_ui_string("|c8033ffccx")[0].color.as_deref(),
+            Some("33ffcc")
+        );
+    }
+
+    #[test]
+    fn an_incomplete_colour_code_resets_instead_of_guessing() {
+        // Fewer than eight hex digits is no colour — better plain than wrong.
+        let segments = parse_ui_string("|cffzzTitle");
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].color, None);
+        assert_eq!(segments[0].text, "zzTitle");
+    }
+
+    #[test]
+    fn empty_runs_are_not_emitted() {
+        // Two colour codes in a row must not produce a blank segment.
+        let segments = parse_ui_string("|cff112233|cff445566x");
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].color.as_deref(), Some("445566"));
+        assert!(parse_ui_string("").is_empty());
+        assert!(parse_ui_string("|r").is_empty());
+    }
+
+    #[test]
+    fn segments_and_plain_text_stay_in_step() {
+        // `strip_ui_escapes` is derived from the segments, so the two can
+        // never disagree — that was the point of one parser.
+        for raw in [
+            "|cff33ffccpf|cffffffffQuest",
+            "Atlas |cff7fff7f -Ace2-|r",
+            "a|TInterface\\Icons\\x:16|tb",
+            "|Hitem:1234:0:0:0|h[Thunderfury]|h",
+            "a||b",
+        ] {
+            let joined: String = parse_ui_string(raw)
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect();
+            assert_eq!(joined.trim(), strip_ui_escapes(raw), "{raw}");
+        }
+    }
+
+    #[test]
+    fn toc_exposes_the_segments() {
+        let toc = Toc::parse(SAMPLE);
+        let segments = toc.title_segments();
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].color.as_deref(), Some("33ffcc"));
+        assert_eq!(segments[1].text, "Quest");
+        assert!(Toc::parse(b"").title_segments().is_empty());
+        // Debug/Clone der abgeleiteten Impls ausführen.
+        assert_eq!(segments.clone(), segments);
+        assert!(format!("{:?}", segments[0]).contains("TitleSegment"));
     }
 
     #[test]

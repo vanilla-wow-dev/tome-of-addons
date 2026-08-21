@@ -24,6 +24,13 @@ function addon(overrides: Partial<Addon> = {}): Addon {
     cached: false,
     error: null,
     ...overrides,
+    // Segmente folgen dem tatsächlichen Titel, sonst zeigte die Tabelle den
+    // Vorgabewert statt des überschriebenen.
+    title_spans: overrides.title_spans ?? [
+      { text: overrides.title ?? "pfQuest", color: null },
+    ],
+    // Ohne Farbcodes ist der rohe Titel der Anzeigetitel.
+    title_raw: overrides.title_raw ?? overrides.title ?? "pfQuest",
   };
 }
 
