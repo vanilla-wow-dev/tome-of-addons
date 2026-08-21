@@ -24,7 +24,7 @@ const TONE: Record<string, string> = {
 </script>
 
 <template>
-  <nav class="flex w-56 shrink-0 flex-col gap-1" :aria-label="t('nav.label')">
+  <nav class="flex w-60 shrink-0 flex-col gap-1" :aria-label="t('nav.label')">
     <button
       type="button"
       :class="[
@@ -53,14 +53,17 @@ const TONE: Record<string, string> = {
       <span class="tome-data ml-auto opacity-60">{{ addons.length }}</span>
     </button>
 
+    <!-- Die festen Einträge bleiben stehen, nur die Charakterliste blättert —
+         bei sieben Accounts wird sie sonst länger als das Fenster. -->
     <template v-if="characters.length">
-      <p class="tome-heading mt-5 mb-1 px-1">{{ t("nav.characters") }}</p>
+      <p class="tome-heading mt-5 mb-1 shrink-0 px-1">{{ t("nav.characters") }}</p>
+      <div class="min-h-0 flex-1 overflow-y-auto">
       <button
         v-for="character in characters"
         :key="character.path"
         type="button"
         :class="[
-          'flex cursor-pointer items-center gap-2 rounded-sm px-3 py-1.5 text-left text-sm',
+          'flex w-full cursor-pointer items-center gap-2 rounded-sm px-3 py-1.5 text-left text-sm',
           view === character.path ? 'bg-gold-500/15 font-semibold' : 'hover:bg-gold-500/8',
         ]"
         :aria-current="view === character.path ? 'page' : undefined"
@@ -68,10 +71,9 @@ const TONE: Record<string, string> = {
         @click="emit('select', character.path)"
       >
         <span class="truncate">{{ character.name }}</span>
-        <span class="tome-data ml-auto opacity-60">{{
-          activeCount(character, addons)
-        }}</span>
+        <span class="tome-data ml-auto opacity-60">{{ activeCount(character, addons) }}</span>
       </button>
+      </div>
     </template>
   </nav>
 </template>

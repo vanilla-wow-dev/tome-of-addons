@@ -39,20 +39,25 @@ const activeButOutdated = computed(
 </script>
 
 <template>
-  <section>
-    <h2 class="tome-heading mb-2">{{ character.label }}</h2>
+  <section class="flex min-h-0 flex-col">
+    <h2 class="tome-heading mb-2 shrink-0">{{ character.label }}</h2>
 
-    <p class="tome-data mb-4 text-sm opacity-70">
+    <p class="tome-data mb-4 shrink-0 text-sm opacity-70">
       {{ t("character.tally", { on: tally.on, off: tally.off, unseen: tally.unseen }) }}
     </p>
 
     <p
       v-if="activeButOutdated"
-      class="text-verdict-warn dark:text-verdict-warn-dark mb-4 text-sm"
+      class="text-verdict-warn dark:text-verdict-warn-dark mb-4 shrink-0 text-sm"
     >
       {{ t("character.activeButOutdated", { n: activeButOutdated }, activeButOutdated) }}
     </p>
 
-    <AddonTable :scan="scan" :client-interface="clientInterface" :character="character" />
+    <AddonTable
+      class="min-h-0 flex-1"
+      :scan="scan"
+      :client-interface="clientInterface"
+      :character="character"
+    />
   </section>
 </template>

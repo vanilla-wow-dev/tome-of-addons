@@ -226,8 +226,12 @@ async function restartNow() {
 </script>
 
 <template>
-  <main class="relative z-[1] mx-auto max-w-6xl px-6 py-[4vh]">
-    <header class="mb-6 flex items-end gap-4">
+  <!-- Volle Fensterfläche, Scrollen ausschließlich innen: die Kopfzeile und
+       die Seitenleiste sollen beim Blättern stehen bleiben. `min-w` verhindert,
+       dass die Tabelle unter einer bestimmten Breite unlesbar zusammenfällt —
+       schmaler wird das Fenster ohnehin nicht (minWidth in tauri.conf.json). -->
+  <main class="relative z-[1] flex h-full min-w-[860px] flex-col gap-4 px-6 py-4">
+    <header class="flex shrink-0 items-end gap-4">
       <div>
         <h1 class="text-3xl text-gold-700 dark:text-gold-300">Tome of Addons</h1>
         <p class="text-sm italic opacity-70">{{ t("tagline") }}</p>
@@ -248,7 +252,7 @@ async function restartNow() {
 
     <!-- Der Update-Banner steht über allem, damit er in jeder Ansicht sichtbar
          bleibt statt an eine davon gebunden zu sein. -->
-    <div v-if="message" class="tome-panel mb-6 flex flex-wrap items-center gap-4 p-4">
+    <div v-if="message" class="tome-panel flex shrink-0 flex-wrap items-center gap-4 p-4">
       <p>{{ message }}</p>
       <p v-if="status === 'downloading'" class="tome-data opacity-70">
         {{ fmtBytes(progress.downloaded)
@@ -267,7 +271,7 @@ async function restartNow() {
       </button>
     </div>
 
-    <div class="flex gap-6">
+    <div class="flex min-h-0 flex-1 gap-6 pb-2">
       <SideBar
         :health="health"
         :addons="addonScan?.addons ?? []"
@@ -276,9 +280,10 @@ async function restartNow() {
         @select="view = $event"
       />
 
-      <div class="tome-panel min-w-0 flex-1 p-5">
+      <div class="tome-panel flex min-h-0 min-w-0 flex-1 flex-col p-5">
         <WowView
           v-if="view === 'wow'"
+          class="min-h-0 flex-1 overflow-y-auto"
           :detection="detection"
           :exe-info="exeInfo"
           :health="health"
@@ -288,7 +293,7 @@ async function restartNow() {
         />
 
         <template v-else>
-          <div v-if="addonBusy">
+          <div v-if="addonBusy" class="min-h-0 flex-1 overflow-y-auto">
             <p class="tome-heading mb-3">{{ t("addons.title") }}</p>
             <p class="mb-2 text-sm opacity-70">
               {{
@@ -326,14 +331,20 @@ async function restartNow() {
           <CharacterView
             v-else-if="addonScan && activeCharacter"
             :key="activeCharacter.path"
+            class="flex min-h-0 flex-1 flex-col"
             :character="activeCharacter"
             :scan="addonScan"
             :client-interface="clientInterface"
           />
 
-          <section v-else-if="addonScan">
-            <h2 class="tome-heading mb-4">{{ t("addons.title") }}</h2>
-            <AddonTable key="addons" :scan="addonScan" :client-interface="clientInterface" />
+          <section v-else-if="addonScan" class="flex min-h-0 flex-1 flex-col">
+            <h2 class="tome-heading mb-4 shrink-0">{{ t("addons.title") }}</h2>
+            <AddonTable
+              key="addons"
+              class="min-h-0 flex-1"
+              :scan="addonScan"
+              :client-interface="clientInterface"
+            />
           </section>
         </template>
       </div>

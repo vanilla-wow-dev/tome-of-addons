@@ -87,6 +87,7 @@
       linear-gradient(160deg, var(--color-parchment-100), var(--color-parchment-200));
     --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.35'/%3E%3C/svg%3E");
     --grain-strength: 0.06;
+    --panel-bg: var(--color-parchment-50);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -99,7 +100,14 @@
         radial-gradient(ellipse 70% 50% at 90% 100%, rgba(0, 0, 0, 0.5), transparent 65%),
         linear-gradient(160deg, var(--color-leather-700), var(--color-leather-900));
       --grain-strength: 0.09;
+      --panel-bg: var(--color-leather-800);
     }
+  }
+
+  html,
+  body,
+  #app {
+    height: 100%;
   }
 
   html {
@@ -114,8 +122,13 @@
 
   body {
     position: relative;
-    min-height: 100vh;
     margin: 0;
+    /* Die App füllt das Fenster und scrollt innen — ein senkrechter
+       Fenster-Scrollbalken würde Kopfzeile und Seitenleiste mitschieben.
+       Waagerecht bleibt `auto` als Notausgang: fiele das Fenster je unter die
+       Mindestbreite, wäre der Inhalt sonst unerreichbar abgeschnitten. */
+    overflow-x: auto;
+    overflow-y: hidden;
     background: var(--surface);
     background-attachment: fixed;
     font-family: var(--font-body);
@@ -171,16 +184,24 @@
   border: 1px solid var(--color-gold-700);
   outline: 1px solid color-mix(in srgb, var(--color-gold-500) 35%, transparent);
   outline-offset: 3px;
-  background: color-mix(in srgb, var(--color-parchment-50) 82%, transparent);
+  background: var(--panel-bg);
   box-shadow:
     0 1px 0 color-mix(in srgb, white 55%, transparent) inset,
     0 8px 28px -14px rgba(0, 0, 0, 0.55);
   border-radius: 2px;
 
   @media (prefers-color-scheme: dark) {
-    background: color-mix(in srgb, var(--color-leather-800) 88%, transparent);
     border-color: var(--color-gold-700);
   }
+}
+
+/* Klebender Tabellenkopf. Braucht denselben deckenden Ton wie das Panel —
+   sonst scheinen die Zeilen darunter durch. */
+@utility tome-sticky-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-bg);
 }
 
 /* Kapitälchen-Überschrift mit flankierenden Zierlinien. */

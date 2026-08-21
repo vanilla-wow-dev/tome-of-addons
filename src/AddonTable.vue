@@ -142,8 +142,8 @@ async function copyHash(addon: Addon) {
 </script>
 
 <template>
-  <section>
-    <div class="mb-4 flex flex-wrap items-center gap-4">
+  <section class="flex min-h-0 flex-col">
+    <div class="mb-4 flex shrink-0 flex-wrap items-center gap-4">
       <input
         v-model="query"
         type="search"
@@ -172,14 +172,16 @@ async function copyHash(addon: Addon) {
          Addon statt bei der Interface-Version. -->
     <p
       v-if="outdatedCount"
-      class="text-verdict-warn dark:text-verdict-warn-dark mb-4 text-sm"
+      class="text-verdict-warn dark:text-verdict-warn-dark mb-4 shrink-0 text-sm"
     >
       {{ t("addons.outdatedHint", { n: outdatedCount, client: props.clientInterface }, outdatedCount) }}
     </p>
 
-    <div class="overflow-x-auto">
+    <!-- Nur der Rumpf blättert; der Spaltenkopf klebt oben, sonst weiß man bei
+         242 Zeilen nach dem ersten Bildschirm nicht mehr, welche Spalte was ist. -->
+    <div class="min-h-0 flex-1 overflow-auto">
       <table class="w-full border-collapse text-left">
-        <thead>
+        <thead class="tome-sticky-head">
           <tr class="border-b border-gold-700/50">
             <th
               v-for="header in table.getHeaderGroups()[0].headers"
@@ -356,7 +358,7 @@ async function copyHash(addon: Addon) {
     <!-- Übersprungene Ordner bleiben sichtbar statt still zu verschwinden:
          ein falsch benanntes .toc ist ein echter Installationsfehler, den der
          Nutzer sonst nie erfährt (WoW lädt den Ordner ebenfalls nicht). -->
-    <div v-if="props.scan.skipped.length" class="mt-5 border-t border-gold-700/30 pt-3">
+    <div v-if="props.scan.skipped.length" class="mt-5 shrink-0 border-t border-gold-700/30 pt-3">
       <button
         type="button"
         class="cursor-pointer text-sm opacity-70 hover:opacity-100"
